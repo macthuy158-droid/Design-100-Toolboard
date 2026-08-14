@@ -46,6 +46,23 @@ def _migrate_legacy_slugs(conn):
         conn.execute("UPDATE tool_submissions SET slug=? WHERE tool_id=?", ("text-100", legacy["id"]))
 
 
+def _backfill_legacy_tool_owners(conn):
+    """Bind legacy tools to the first developer whose approved submission updated them."""
+    tools = conn.execute("SELECT id,developer_name FROM tools WHERE owner_user_id IS NULL").fetchall()
+    for tool in tools:
+        first = conn.execute(
+            "SELECT s.user_id,u.display_name FROM tool_submissions s "
+            "JOIN community_users u ON u.id=s.user_id "
+            "WHERE s.tool_id=? AND s.status='approved' ORDER BY s.id ASC LIMIT 1",
+            (tool["id"],),
+        ).fetchone()
+        if first:
+            conn.execute(
+                "UPDATE tools SET owner_user_id=?,developer_name=?,updated_at=? WHERE id=?",
+                (first["user_id"], first["display_name"], now(), tool["id"]),
+            )
+
+
 def init_db():
     site.init_db()
     SUBMISSION_DIR.mkdir(parents=True, exist_ok=True)
@@ -144,6 +161,7 @@ def init_db():
         if 'developer_name' not in cols:
             conn.execute("ALTER TABLE tools ADD COLUMN developer_name TEXT NOT NULL DEFAULT ''")
         _migrate_legacy_slugs(conn)
+        _backfill_legacy_tool_owners(conn)
 
 
 def make_session(user_id: int):
@@ -171,12 +189,25 @@ def role_label(role: str):
     return "小飞侠" if role == ROLE_XIAOFEIXIA else "小游侠"
 
 
+def is_tool_owner(tool, user):
+    if not tool or not user or user['role'] != ROLE_XIAOFEIXIA:
+        return False
+    owner = tool['owner_user_id']
+    return owner is not None and int(owner) == int(user['id'])
+
+
 def can_download(conn, user, tool):
     if not user or not user['active']:
         return False
     if user['role'] == ROLE_XIAOFEIXIA:
         return True
-    return bool(conn.execute("SELECT id FROM entitlements WHERE user_id=? AND tool_id=?", (user['id'], tool['id'])).fetchone())
+    # Peer users must have a genuinely paid order. Old zero-yuan/free grants do
+    # not count, preventing accidental free access after a pricing mistake.
+    return bool(conn.execute(
+        "SELECT e.id FROM entitlements e JOIN orders o ON o.id=e.order_id "
+        "WHERE e.user_id=? AND e.tool_id=? AND o.status='paid' AND o.amount_cents>0 LIMIT 1",
+        (user['id'], tool['id']),
+    ).fetchone())
 
 
 def import_cad_users():
@@ -214,6 +245,8 @@ def grant_order(order_id: int):
     with site.db() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not order:
+            return False
+        if int(order['amount_cents'] or 0) <= 0:
             return False
         stamp = now()
         conn.execute("UPDATE orders SET status='paid',provider='manual',paid_at=? WHERE id=?", (stamp,order_id))
