@@ -1,9 +1,12 @@
 import hmac
+import os
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from app_v2 import ADMIN_USERNAME, ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, session_token, valid_session
+from app_v2 import ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, session_token, valid_session
+
+ADMIN_USERNAME = os.getenv("TOOLBOARD_ADMIN_USERNAME", "admin").strip() or "admin"
 
 app = FastAPI(title="Design 100 Admin", docs_url=None, redoc_url=None, openapi_url=None)
 
