@@ -1,5 +1,7 @@
 """Canonical application entrypoint for 小飞侠设计100%."""
 
+from fastapi import Request
+
 import app_v2 as public_site
 import admin_portal
 import community_admin
@@ -9,6 +11,44 @@ import community_portal
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
 HERO_TITLE = "Desgin 100%"
+
+SESSION_UI = r'''
+<script>
+(() => {
+  async function syncMemberNav() {
+    try {
+      const res = await fetch('/account/session', {
+        credentials: 'same-origin',
+        cache: 'no-store'
+      });
+      if (!res.ok) return;
+      const state = await res.json();
+      if (!state.authenticated) return;
+
+      document.querySelectorAll('.navlinks').forEach(nav => {
+        const login = nav.querySelector('a[href="/account/login"]');
+        const register = nav.querySelector('a[href="/account/register"]');
+        const developer = nav.querySelector('a[href="/developer/submit"]');
+
+        if (login) {
+          login.href = '/account/me';
+          login.textContent = `${state.display_name} · ${state.role_label}`;
+          login.title = '进入个人中心';
+        }
+        if (register) register.remove();
+        if (developer && state.role !== 'xiaofeixia') developer.remove();
+      });
+    } catch (_) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', syncMemberNav);
+  } else {
+    syncMemberNav();
+  }
+})();
+</script>
+'''
 
 
 def brand_text(value: str) -> str:
@@ -38,7 +78,11 @@ def branded_page(body, title=SITE_TITLE, extra=""):
         f"<h1>{HERO_TITLE}</h1>",
         1,
     )
-    return _original_page(branded_body, brand_text(title), extra)
+    return _original_page(
+        branded_body,
+        brand_text(title),
+        (extra or "") + SESSION_UI,
+    )
 
 
 public_site.nav = branded_nav
@@ -48,6 +92,21 @@ app = public_site.app
 
 community_core.init_db()
 community_portal.install_public_routes(app)
+
+
+@app.get("/account/session")
+def account_session(request: Request):
+    user = community_core.current_user(request)
+    if not user:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "display_name": user["display_name"],
+        "role": user["role"],
+        "role_label": community_core.role_label(user["role"]),
+    }
+
+
 app.include_router(community_portal.router, prefix="/account")
 app.include_router(community_portal.developer_router, prefix="/developer")
 
