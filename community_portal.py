@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import secrets
 from pathlib import Path
 
@@ -70,10 +69,9 @@ def register(display_name: str = Form(...), email: str = Form(...), password: st
     core.init_db()
     if len(password)<6: raise HTTPException(400,"密码至少 6 位。")
     email=email.strip().lower(); name=display_name.strip(); salt,digest=core.hash_password(password); stamp=core.now()
-    username=email
     try:
         with site.db() as conn:
-            cur=conn.execute("INSERT INTO community_users(username,display_name,email,password_salt,password_hash,role,active,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",(username,name,email,salt,digest,core.ROLE_XIAOYOUXIA,stamp,stamp)); uid=cur.lastrowid
+            cur=conn.execute("INSERT INTO community_users(username,display_name,email,password_salt,password_hash,role,active,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",(email,name,email,salt,digest,core.ROLE_XIAOYOUXIA,stamp,stamp)); uid=cur.lastrowid
     except Exception:
         raise HTTPException(409,"这个邮箱已经注册。")
     resp=RedirectResponse('/',303); resp.set_cookie(core.USER_COOKIE,core.make_session(uid),httponly=True,secure=True,samesite="lax",max_age=7*86400); return resp
@@ -90,9 +88,11 @@ def me(request: Request):
     with site.db() as conn:
         orders=conn.execute("SELECT o.*,t.name FROM orders o JOIN tools t ON t.id=o.tool_id WHERE o.user_id=? ORDER BY o.id DESC",(user['id'],)).fetchall()
         submissions=conn.execute("SELECT * FROM tool_submissions WHERE user_id=? ORDER BY id DESC",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
+        owned=conn.execute("SELECT name,slug,price_cents FROM tools WHERE owner_user_id=? AND active=1 ORDER BY name",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
     order_rows=''.join(f'<tr><td>{site.esc(o["name"])}</td><td>¥{o["amount_cents"]/100:.2f}</td><td>{site.esc(o["status"])}</td></tr>' for o in orders) or '<tr><td colspan="3">暂无订单</td></tr>'
     sub_rows=''.join(f'<tr><td>{site.esc(s["name"] or s["version"])}</td><td>{site.esc(s["submission_type"])}</td><td>{site.esc(s["status"])}</td></tr>' for s in submissions) or '<tr><td colspan="3">暂无投稿</td></tr>'
-    dev=f'<div class="community-card"><h2>开发者中心</h2><p>每位小飞侠都是开发者，可以提交新工具或已有工具的新版本。</p><a class="btn" href="/developer/submit">提交工具</a><table class="table"><tbody>{sub_rows}</tbody></table></div>' if user['role']==core.ROLE_XIAOFEIXIA else ''
+    owned_rows=''.join(f'<tr><td>{site.esc(t["name"])}</td><td>¥{int(t["price_cents"] or 0)/100:.2f}</td><td><a href="/developer/submit">提交新版本</a></td></tr>' for t in owned) or '<tr><td colspan="3">暂无已归属工具</td></tr>'
+    dev=f'<div class="community-card"><h2>开发者中心</h2><p>可以提交新工具；已有工具的新版本仅限该工具原开发者提交。</p><a class="btn" href="/developer/submit">提交工具 / 新版本</a><h3>我的工具</h3><table class="table"><tbody>{owned_rows}</tbody></table><h3>投稿记录</h3><table class="table"><tbody>{sub_rows}</tbody></table></div>' if user['role']==core.ROLE_XIAOFEIXIA else ''
     body=f'<div class="community-wrap"><div class="community-card"><span class="role">{core.role_label(user["role"])}</span><h1>{site.esc(user["display_name"])}</h1><p>{site.esc(user["email"] or "院内账号")}</p><form action="/account/logout" method="post"><button class="btn secondary">退出登录</button></form></div>{dev}<div class="community-card"><h2>我的购买</h2><table class="table"><tbody>{order_rows}</tbody></table></div></div>'
     return HTMLResponse(page(body,"我的账号 · 小飞侠设计100%"))
 
@@ -117,10 +117,10 @@ def create_order(request: Request, slug: str):
     with site.db() as conn:
         tool=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
         if not tool: raise HTTPException(404,"工具不存在。")
-        if conn.execute("SELECT id FROM entitlements WHERE user_id=? AND tool_id=?",(user['id'],tool['id'])).fetchone(): return RedirectResponse(f'/tools/{slug}/download',303)
-        order_no='D100'+secrets.token_hex(8).upper(); cur=conn.execute("INSERT INTO orders(order_no,user_id,tool_id,amount_cents,status,created_at) VALUES(?,?,?,?,?,?)",(order_no,user['id'],tool['id'],int(tool['price_cents'] or 0),'pending',core.now())); oid=cur.lastrowid
-        if int(tool['price_cents'] or 0)==0:
-            stamp=core.now(); conn.execute("UPDATE orders SET status='paid',provider='free',paid_at=? WHERE id=?",(stamp,oid)); conn.execute("INSERT OR IGNORE INTO entitlements(user_id,tool_id,order_id,granted_at) VALUES(?,?,?,?)",(user['id'],tool['id'],oid,stamp)); return RedirectResponse(f'/tools/{slug}/download',303)
+        if core.can_download(conn,user,tool): return RedirectResponse(f'/tools/{slug}/download',303)
+        price=int(tool['price_cents'] or 0)
+        if price<=0: raise HTTPException(409,"该工具的同行价格尚未配置，请联系管理员。")
+        order_no='D100'+secrets.token_hex(8).upper(); cur=conn.execute("INSERT INTO orders(order_no,user_id,tool_id,amount_cents,status,created_at) VALUES(?,?,?,?,?,?)",(order_no,user['id'],tool['id'],price,'pending',core.now())); oid=cur.lastrowid
     return RedirectResponse(f'/account/orders/{oid}',303)
 
 
@@ -135,40 +135,44 @@ def order_page(request: Request, order_id: int):
     return HTMLResponse(page(body,"订单 · 小飞侠设计100%"))
 
 
-# -------- developer --------
 developer_router=APIRouter()
 
 @developer_router.get("/submit", response_class=HTMLResponse)
 def submit_page(request: Request):
-    user=developer_required(request)
-    with site.db() as conn: tools=conn.execute("SELECT id,name,slug FROM tools WHERE active=1 ORDER BY name").fetchall()
-    opts=''.join(f'<option value="{site.esc(t["slug"])}">{site.esc(t["name"])}</option>' for t in tools)
-    body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">提交后状态为“待审核”，管理员审核通过后才会公开发布。</div>
+    core.init_db(); user=developer_required(request)
+    with site.db() as conn:
+        tools=conn.execute("SELECT id,name,slug,price_cents FROM tools WHERE active=1 AND owner_user_id=? ORDER BY name",(user['id'],)).fetchall()
+    opts=''.join(f'<option value="{site.esc(t["slug"])}">{site.esc(t["name"])} · ¥{int(t["price_cents"] or 0)/100:.2f}</option>' for t in tools)
+    body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">新工具可自行提交；已有工具的新版本只允许原开发者提交。同行价格会在审核通过后同步到产品。</div>
     <form action="/developer/submit" method="post" enctype="multipart/form-data"><div class="field"><label>投稿类型</label><select name="submission_type"><option value="new_tool">新工具</option><option value="new_release">已有工具新版本</option></select></div>
-    <div class="field"><label>已有工具（仅新版本时选择）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>Slug</label><input name="slug" placeholder="例如 text-100"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div></div><div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>同行价格（元）</label><input name="price_yuan" type="number" min="0" step="0.01" value="0"></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
+    <div class="field"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>Slug</label><input name="slug" placeholder="例如 text-100"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div></div><div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>同行价格（元）</label><input name="price_yuan" type="number" min="0.01" step="0.01" required></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
     <div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包</label><input name="package" type="file" required></div><button class="btn">提交审核</button></form></div></div>'''
     return HTMLResponse(page(body,"开发者投稿 · 小飞侠设计100%"))
 
+
 @developer_router.post("/submit")
-async def submit(request: Request, submission_type: str=Form(...), existing_slug: str=Form(""), name: str=Form(""), slug: str=Form(""), tagline: str=Form(""), description: str=Form(""), category: str=Form("效率工具"), platform: str=Form("Windows"), icon_text: str=Form("100"), price_yuan: float=Form(0), version: str=Form(...), notes: str=Form(""), package: UploadFile=File(...)):
-    user=developer_required(request); content=await package.read()
+async def submit(request: Request, submission_type: str=Form(...), existing_slug: str=Form(""), name: str=Form(""), slug: str=Form(""), tagline: str=Form(""), description: str=Form(""), category: str=Form("效率工具"), platform: str=Form("Windows"), icon_text: str=Form("100"), price_yuan: float=Form(...), version: str=Form(...), notes: str=Form(""), package: UploadFile=File(...)):
+    core.init_db(); user=developer_required(request); content=await package.read()
     if not content or len(content)>core.MAX_UPLOAD_BYTES: raise HTTPException(400,"安装包为空或超过大小限制。")
+    if price_yuan<=0: raise HTTPException(400,"同行价格必须大于 0 元。")
     with site.db() as conn:
         tool=None
         if submission_type=='new_release':
-            tool=conn.execute("SELECT * FROM tools WHERE slug=?",(existing_slug.strip(),)).fetchone()
+            tool=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(existing_slug.strip(),)).fetchone()
             if not tool: raise HTTPException(404,"已有工具不存在。")
-            name=tool['name']; slug=tool['slug']; tagline=tool['tagline']; description=tool['description']; category=tool['category']; platform=tool['platform']; icon_text=tool['icon_text']; price_yuan=(tool['price_cents'] or 0)/100
-        else:
+            if not core.is_tool_owner(tool,user): raise HTTPException(403,"只有该工具原开发者可以提交新版本。")
+            name=tool['name']; slug=tool['slug']; tagline=tool['tagline']; description=tool['description']; category=tool['category']; platform=tool['platform']; icon_text=tool['icon_text']
+        elif submission_type=='new_tool':
             slug=slug.strip().lower()
             if not core.VALID_SLUG.match(slug): raise HTTPException(400,"Slug 只能使用小写英文、数字和短横线。")
+        else:
+            raise HTTPException(400,"投稿类型无效。")
         safe=(package.filename or f'{slug}-{version}.zip').replace('/','_').replace('\\','_'); folder=core.SUBMISSION_DIR/str(user['id']); folder.mkdir(parents=True,exist_ok=True); path=folder/f'{secrets.token_hex(4)}-{safe}'; path.write_bytes(content); digest=hashlib.sha256(content).hexdigest()
         conn.execute("INSERT INTO tool_submissions(user_id,submission_type,tool_id,slug,name,tagline,description,category,platform,icon_text,price_cents,version,notes,package_name,package_path,sha256,size,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)",(user['id'],submission_type,tool['id'] if tool else None,slug,name.strip(),tagline.strip(),description.strip(),category.strip(),platform.strip(),icon_text.strip(),int(round(price_yuan*100)),version.strip(),notes.strip(),safe,str(path),digest,len(content),core.now()))
     return RedirectResponse('/account/me',303)
 
 
 def install_public_routes(app):
-    """Replace legacy detail/download routes with community-aware versions."""
     app.router.routes[:] = [r for r in app.router.routes if getattr(r,'path',None) not in ('/tools/{slug}','/tools/{slug}/download')]
 
     @app.get('/tools/{slug}',response_class=HTMLResponse)
@@ -181,13 +185,14 @@ def install_public_routes(app):
         version=rel['version'] if rel else '待发布'; developer=t['developer_name'] or '小飞侠开发者'; price=int(t['price_cents'] or 0)
         if not user: action=f'<a class="btn" href="/account/login?next=/tools/{site.esc(slug)}">登录后下载</a>'
         elif allowed: action=f'<a class="btn" href="/tools/{site.esc(slug)}/download">下载 · v{site.esc(version)}</a>'
-        elif user['role']==core.ROLE_XIAOYOUXIA: action=f'<form action="/account/tools/{site.esc(slug)}/order" method="post"><button class="btn">购买 ¥{price/100:.2f}</button></form>'
+        elif user['role']==core.ROLE_XIAOYOUXIA and price>0: action=f'<form action="/account/tools/{site.esc(slug)}/order" method="post"><button class="btn">购买 ¥{price/100:.2f}</button></form>'
+        elif user['role']==core.ROLE_XIAOYOUXIA: action='<span class="btn" style="background:#999">价格待配置</span>'
         else: action=''
         review_html=''.join(f'<div class="review"><div><b>{site.esc(r["display_name"])}</b> · <span class="stars">{"★"*int(r["rating"])}{"☆"*(5-int(r["rating"]))}</span></div><p>{site.esc(r["content"])}</p></div>' for r in reviews) or '<p>暂无评价，欢迎成为第一个评价的人。</p>'
         review_form=f'''<form action="/account/tools/{site.esc(slug)}/review" method="post"><div class="field"><label>评分 1-5</label><input name="rating" type="number" min="1" max="5" value="5" required></div><div class="field"><label>留言</label><textarea name="content"></textarea></div><button class="btn secondary">发布评价</button></form>''' if user else '<a class="btn secondary" href="/account/login?next=/tools/'+site.esc(slug)+'">登录后评价</a>'
         role_nav=(f'<a class="admin-link" href="/account/me">{site.esc(user["display_name"])} · {core.role_label(user["role"])}</a>' if user else '<a class="admin-link" href="/account/login">登录 / 注册</a>')
         nav_html=site.nav().replace('<a class="admin-link" href="/manage">管理</a>',role_nav)
-        body=nav_html+f'''<div class="shell"><section class="detail-hero"><a class="back" href="/">← 返回 Desgin 100%</a><div class="product"><div><div class="eyebrow">{site.esc(t['category'])} · {site.esc(t['platform'])}</div><h1>{site.esc(t['name'])}</h1><div class="lead">{site.esc(t['tagline'])}</div><div class="facts"><div class="fact"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="fact"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="fact"><b>{developer}</b><span>开发者</span></div><div class="fact"><b>{(str(round(avg['a'],1))+' / 5') if avg['c'] else '—'}</b><span>{avg['c']} 条评价</span></div></div>{action}</div><div class="product-icon">{site.esc(t['icon_text'])}</div></div></section><section class="detail-grid"><div class="panel"><h2>工具介绍</h2><p>{site.esc(t['description'])}</p></div><div class="panel"><h2>获取方式</h2><p>小飞侠：院内账号免费下载。\n小游侠：注册后按产品价格购买下载。</p><div class="price">{'院内免费' if user and user['role']==core.ROLE_XIAOFEIXIA else ('¥%.2f'%(price/100))}</div></div></section><section id="reviews" class="panel" style="margin-bottom:80px"><h2>评价与留言</h2>{review_form}<div style="margin-top:24px">{review_html}</div></section></div>'''
+        body=nav_html+f'''<div class="shell"><section class="detail-hero"><a class="back" href="/">← 返回 Desgin 100%</a><div class="product"><div><div class="eyebrow">{site.esc(t['category'])} · {site.esc(t['platform'])}</div><h1>{site.esc(t['name'])}</h1><div class="lead">{site.esc(t['tagline'])}</div><div class="facts"><div class="fact"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="fact"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="fact"><b>{site.esc(developer)}</b><span>开发者</span></div><div class="fact"><b>{(str(round(avg['a'],1))+' / 5') if avg['c'] else '—'}</b><span>{avg['c']} 条评价</span></div></div>{action}</div><div class="product-icon">{site.esc(t['icon_text'])}</div></div></section><section class="detail-grid"><div class="panel"><h2>工具介绍</h2><p>{site.esc(t['description'])}</p></div><div class="panel"><h2>获取方式</h2><p>小飞侠：院内账号免费下载。\n小游侠：注册后按产品价格购买下载。</p><div class="price">{'院内免费' if user and user['role']==core.ROLE_XIAOFEIXIA else ('¥%.2f'%(price/100))}</div></div></section><section id="reviews" class="panel" style="margin-bottom:80px"><h2>评价与留言</h2>{review_form}<div style="margin-top:24px">{review_html}</div></section></div>'''
         return HTMLResponse(site.page(body,f"{t['name']} · 小飞侠设计100%",EXTRA_CSS))
 
     @app.get('/tools/{slug}/download')
