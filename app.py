@@ -38,27 +38,6 @@ def branded_page(body, title=SITE_TITLE, extra=""):
         f"<h1>{HERO_TITLE}</h1>",
         1,
     )
-    if '<section id="tools">' in branded_body and 'member-intro' not in branded_body:
-        member_intro = '''
-        <section class="member-intro" style="padding:18px 0 10px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div style="background:#fff;border:1px solid #e6e6e3;border-radius:24px;padding:24px">
-              <div class="eyebrow">院内用户 · DEVELOPER</div>
-              <h2 style="margin:9px 0 8px;font-size:24px">小飞侠</h2>
-              <p style="margin:0 0 18px;color:#777;font-size:13px;line-height:1.8">院内人员由管理员统一添加，无需自行注册。登录后全部工具免费下载，每位小飞侠都是开发者，可以提交工具和新版本，审核通过后公开发布。</p>
-              <a class="btn" href="/account/login">小飞侠登录</a> <a class="btn secondary" href="/developer/submit">开发者投稿</a>
-            </div>
-            <div style="background:#fff;border:1px solid #e6e6e3;border-radius:24px;padding:24px">
-              <div class="eyebrow">同行用户 · PEER USER</div>
-              <h2 style="margin:9px 0 8px;font-size:24px">小游侠</h2>
-              <p style="margin:0 0 18px;color:#777;font-size:13px;line-height:1.8">同行用户自行注册账号，可购买、下载、评分和留言。小游侠只使用工具，不具备产品发布权限。</p>
-              <a class="btn" href="/account/register">注册小游侠</a> <a class="btn secondary" href="/account/login">已有账号登录</a>
-            </div>
-          </div>
-        </section>
-        <style>@media(max-width:700px){.member-intro>div{grid-template-columns:1fr!important}}</style>
-        '''
-        branded_body = branded_body.replace('<section id="tools">', member_intro + '<section id="tools">', 1)
     return _original_page(branded_body, brand_text(title), extra)
 
 
