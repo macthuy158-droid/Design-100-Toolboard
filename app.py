@@ -115,15 +115,9 @@ _original_admin_page = admin_portal.admin_page
 
 def branded_admin_page(body, title=f"{BRAND_NAME} · 管理后台"):
     body = brand_text(body)
-    body = body.replace("DESIGN 100 · TOOL ADMIN", f"{BRAND_NAME} · TOOL ADMIN")
+    body = body.replace("DESIGN 100 · PRODUCT ADMIN", f"{BRAND_NAME} · PRODUCT ADMIN")
     body = body.replace("DESIGN 100 · ADMIN", f"{BRAND_NAME} · ADMIN")
     body = body.replace("DESIGN 100", BRAND_NAME)
-    if "/manage/community/" not in body:
-        body = body.replace(
-            '<button class="btn secondary" onclick=',
-            '<a class="btn secondary" href="/manage/community/">用户 / 投稿 / 订单</a> <button class="btn secondary" onclick=',
-            1,
-        )
     return _original_admin_page(body, brand_text(title))
 
 
