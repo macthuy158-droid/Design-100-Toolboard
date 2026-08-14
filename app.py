@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import html
 import os
 import secrets
 import sqlite3
@@ -17,216 +18,125 @@ PACKAGE_DIR = DATA_DIR / "packages"
 ADMIN_PASSWORD = os.getenv("TOOLBOARD_ADMIN_PASSWORD", "")
 SESSION_SECRET = os.getenv("TOOLBOARD_SESSION_SECRET", "") or secrets.token_hex(32)
 COOKIE_NAME = "design100_admin"
+app = FastAPI(title="深圳院设计100% 工具开发板", version="1.1")
 
-app = FastAPI(title="深圳院设计100% 工具开发板", version="1.0")
-
-
-def now_text():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
+def now_text(): return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def esc(value): return html.escape(str(value or ""), quote=True)
+def format_bytes(value):
+    size=int(value or 0)
+    for unit in ("B","KB","MB","GB"):
+        if size<1024 or unit=="GB": return f"{size:.0f} {unit}" if unit=="B" else f"{size:.1f} {unit}"
+        size/=1024
+    return f"{size:.1f} GB"
 
 @contextmanager
 def db():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=20)
-    conn.row_factory = sqlite3.Row
+    DATA_DIR.mkdir(parents=True,exist_ok=True)
+    conn=sqlite3.connect(str(DB_PATH),timeout=20); conn.row_factory=sqlite3.Row
     try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
+        yield conn; conn.commit()
+    finally: conn.close()
 
 def init_db():
-    PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+    PACKAGE_DIR.mkdir(parents=True,exist_ok=True)
     with db() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS tools (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            name TEXT NOT NULL,
-            tagline TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            category TEXT NOT NULL DEFAULT '效率工具',
-            platform TEXT NOT NULL DEFAULT 'Windows',
-            icon_text TEXT NOT NULL DEFAULT '100',
-            screenshots TEXT NOT NULL DEFAULT '',
-            downloads INTEGER NOT NULL DEFAULT 0,
-            active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS releases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tool_id INTEGER NOT NULL,
-            version TEXT NOT NULL,
-            notes TEXT NOT NULL DEFAULT '',
-            package_name TEXT NOT NULL,
-            package_path TEXT NOT NULL,
-            sha256 TEXT NOT NULL,
-            size INTEGER NOT NULL DEFAULT 0,
-            published_at TEXT NOT NULL,
-            active INTEGER NOT NULL DEFAULT 1,
-            FOREIGN KEY(tool_id) REFERENCES tools(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_tools_rank ON tools(active, downloads DESC, id ASC);
-        CREATE INDEX IF NOT EXISTS idx_releases_tool ON releases(tool_id, active, id DESC);
-        """)
-        exists = conn.execute("SELECT id FROM tools WHERE slug='cad-100'").fetchone()
-        if not exists:
-            now = now_text()
-            conn.execute("""INSERT INTO tools
-                (slug,name,tagline,description,category,platform,icon_text,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?)""", (
-                "cad-100", "CAD-100", "面向设计生产流程的 CAD 批量效率工具",
-                "围绕日常 CAD 图纸处理流程，将重复操作自动化，降低批量处理工作量。设计文件在本机完成处理，不上传图纸内容。",
-                "CAD / 设计效率", "Windows", "CAD", now, now
-            ))
-
+        conn.executescript('''
+        CREATE TABLE IF NOT EXISTS tools (id INTEGER PRIMARY KEY AUTOINCREMENT,slug TEXT NOT NULL UNIQUE COLLATE NOCASE,name TEXT NOT NULL,tagline TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '效率工具',platform TEXT NOT NULL DEFAULT 'Windows',icon_text TEXT NOT NULL DEFAULT '100',screenshots TEXT NOT NULL DEFAULT '',downloads INTEGER NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS releases (id INTEGER PRIMARY KEY AUTOINCREMENT,tool_id INTEGER NOT NULL,version TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',package_name TEXT NOT NULL,package_path TEXT NOT NULL,sha256 TEXT NOT NULL,size INTEGER NOT NULL DEFAULT 0,published_at TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,FOREIGN KEY(tool_id) REFERENCES tools(id) ON DELETE CASCADE);
+        CREATE INDEX IF NOT EXISTS idx_tools_rank ON tools(active,downloads DESC,id ASC);
+        CREATE INDEX IF NOT EXISTS idx_releases_tool ON releases(tool_id,active,id DESC);''')
+        if not conn.execute("SELECT id FROM tools WHERE slug='cad-100'").fetchone():
+            now=now_text(); conn.execute("INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",("cad-100","CAD-100","面向设计生产流程的 CAD 批量效率工具","围绕日常 CAD 图纸处理流程，将重复操作自动化，降低批量处理工作量。设计文件在本机完成处理，不上传图纸内容。","CAD / 设计效率","Windows","CAD",now,now))
 
 @app.on_event("startup")
-def startup():
-    init_db()
-
-
-def latest_release(conn, tool_id):
-    return conn.execute(
-        "SELECT * FROM releases WHERE tool_id=? AND active=1 ORDER BY id DESC LIMIT 1",
-        (tool_id,),
-    ).fetchone()
-
-
+def startup(): init_db()
+def latest_release(conn,tool_id): return conn.execute("SELECT * FROM releases WHERE tool_id=? AND active=1 ORDER BY id DESC LIMIT 1",(tool_id,)).fetchone()
 def session_token():
-    stamp = str(int(datetime.now(timezone.utc).timestamp()) + 8 * 3600)
-    sig = hmac.new(SESSION_SECRET.encode(), stamp.encode(), hashlib.sha256).hexdigest()
-    return stamp + "." + sig
-
-
-def valid_session(request: Request):
-    value = request.cookies.get(COOKIE_NAME, "")
+    stamp=str(int(datetime.now(timezone.utc).timestamp())+8*3600); sig=hmac.new(SESSION_SECRET.encode(),stamp.encode(),hashlib.sha256).hexdigest(); return stamp+"."+sig
+def valid_session(request:Request):
+    value=request.cookies.get(COOKIE_NAME,"")
     try:
-        stamp, sig = value.split(".", 1)
-        if int(stamp) < int(datetime.now(timezone.utc).timestamp()):
-            return False
-        expected = hmac.new(SESSION_SECRET.encode(), stamp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected)
-    except Exception:
-        return False
+        stamp,sig=value.split(".",1)
+        if int(stamp)<int(datetime.now(timezone.utc).timestamp()): return False
+        return hmac.compare_digest(sig,hmac.new(SESSION_SECRET.encode(),stamp.encode(),hashlib.sha256).hexdigest())
+    except Exception: return False
+def require_admin(request:Request):
+    if not valid_session(request): raise HTTPException(status_code=401,detail="请先登录后台。")
 
-
-def require_admin(request: Request):
-    if not valid_session(request):
-        raise HTTPException(status_code=401, detail="请先登录后台。")
-
-
-CSS = r'''
-:root{--bg:#f5f5f7;--card:#fff;--ink:#111216;--muted:#777980;--line:#e5e5e8;--soft:#f1f1f3}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}a{text-decoration:none;color:inherit}.shell{max-width:1220px;margin:auto;padding:0 26px}.nav{height:72px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;gap:12px;align-items:center;font-weight:750}.mark{width:36px;height:36px;border-radius:10px;background:#111;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:800}.brand small{display:block;font-size:10px;color:#888;letter-spacing:.08em;margin-top:2px}.hero{padding:76px 0 58px}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:#777}.hero h1{font-size:clamp(44px,7vw,84px);line-height:1.02;letter-spacing:-.05em;margin:14px 0 22px}.hero p{font-size:18px;line-height:1.75;color:#6f7076;max-width:780px}.summary{display:flex;gap:34px;margin-top:30px}.summary b{font-size:26px;display:block}.summary span{font-size:11px;color:#999}.sectionhead{display:flex;justify-content:space-between;align-items:end;margin:30px 0 16px}.sectionhead h2{margin:0;font-size:25px}.sectionhead span{font-size:12px;color:#888}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding-bottom:80px}.tool{background:#fff;border:1px solid var(--line);border-radius:24px;padding:22px;min-height:286px;display:flex;flex-direction:column;transition:.18s}.tool:hover{transform:translateY(-3px);box-shadow:0 18px 45px rgba(0,0,0,.07)}.rank{font-size:11px;color:#999;font-weight:700;letter-spacing:.08em}.icon{width:58px;height:58px;border-radius:17px;background:#111;color:#fff;display:grid;place-items:center;font-size:13px;font-weight:800;margin:20px 0}.tool h3{font-size:23px;margin:0 0 8px}.tagline{font-size:13px;line-height:1.65;color:#777}.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.chip{background:var(--soft);border-radius:999px;padding:6px 9px;font-size:10px;color:#666}.footrow{display:flex;justify-content:space-between;align-items:end;margin-top:auto;padding-top:22px;border-top:1px solid #f0f0f1}.downloads b{font-size:18px}.downloads span{font-size:10px;color:#999;display:block}.arrow{width:34px;height:34px;border-radius:50%;background:#111;color:#fff;display:grid;place-items:center}.footer{border-top:1px solid #dddde1;padding:28px 0 44px;font-size:11px;color:#999;display:flex;justify-content:space-between}.detail{padding:70px 0 45px;display:grid;grid-template-columns:1fr 320px;gap:60px;align-items:center}.bigicon{width:240px;height:240px;border-radius:56px;background:#111;color:#fff;display:grid;place-items:center;font-size:44px;font-weight:800}.detail h1{font-size:60px;letter-spacing:-.05em;margin:12px 0}.lead{font-size:19px;line-height:1.65;color:#707178}.facts{display:flex;gap:26px;margin:26px 0}.fact b{display:block;font-size:17px}.fact span{font-size:10px;color:#999}.btn{display:inline-flex;align-items:center;justify-content:center;height:46px;padding:0 22px;border-radius:11px;background:#111;color:#fff;border:0;font-weight:700;cursor:pointer}.btn.secondary{background:#fff;color:#111;border:1px solid #d6d6da}.content{display:grid;grid-template-columns:1.3fr .7fr;gap:18px;padding-bottom:80px}.panel{background:#fff;border:1px solid var(--line);border-radius:24px;padding:26px}.panel h2{margin:0 0 14px;font-size:20px}.panel p{font-size:14px;line-height:1.9;color:#62636a;white-space:pre-line}.loginwrap{min-height:100vh;display:grid;place-items:center;padding:24px}.login{width:min(420px,100%);background:#fff;border:1px solid var(--line);border-radius:24px;padding:32px}.login h1{margin:8px 0 20px}.field{margin-bottom:12px}.field label{display:block;font-size:12px;color:#777;margin-bottom:6px}.field input,.field textarea{width:100%;border:1px solid #d7d7db;border-radius:10px;padding:0 11px;font:inherit}.field input{height:42px}.field textarea{height:100px;padding-top:10px}.admin{max-width:1180px;margin:auto;padding:32px 22px 70px}.adminhead{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px}.table{width:100%;border-collapse:collapse}.table th,.table td{text-align:left;border-bottom:1px solid #eee;padding:10px 8px;font-size:12px}.msg{font-size:12px;min-height:18px;margin-top:8px}.ok{color:#287a37}.bad{color:#b42318}@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}.detail,.content{grid-template-columns:1fr}.cards{grid-template-columns:1fr}}@media(max-width:600px){.grid{grid-template-columns:1fr}.shell{padding:0 16px}.detail h1{font-size:44px}.footer{flex-direction:column;gap:8px}}
+CSS=r'''
+:root{--bg:#f6f6f4;--paper:#fff;--ink:#0b0c0d;--muted:#6f7278;--line:#e6e6e3;--soft:#efefec;--black:#0a0b0c;--shadow:0 24px 70px rgba(0,0,0,.08)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}a{text-decoration:none;color:inherit}button,input,textarea{font:inherit}.shell{width:min(1280px,calc(100% - 48px));margin:auto}.nav-wrap{position:sticky;top:0;z-index:20;background:rgba(246,246,244,.88);backdrop-filter:blur(18px);border-bottom:1px solid rgba(230,230,227,.75)}.nav{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px}.brand{display:flex;gap:13px;align-items:center;font-weight:760;letter-spacing:-.02em}.mark{width:42px;height:42px;border-radius:13px;background:var(--black);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:850}.brand-title{font-size:15px}.brand small{display:block;font-size:9px;color:#8b8d91;letter-spacing:.14em;margin-top:4px}.navlinks{display:flex;align-items:center;gap:22px;font-size:12px;color:#64666b}.admin-link{padding:9px 13px;border:1px solid #dededb;border-radius:999px;background:#fff}.hero{padding:52px 0 30px}.hero-card{position:relative;overflow:hidden;background:#0a0b0c;color:#fff;border-radius:38px;min-height:520px;padding:64px}.hero-card:before{content:"100%";position:absolute;right:-40px;top:-74px;font-size:250px;font-weight:900;letter-spacing:-.1em;color:rgba(255,255,255,.045);line-height:1}.hero-kicker{font-size:11px;font-weight:750;letter-spacing:.16em;color:#a8aaae}.hero h1{position:relative;z-index:1;font-size:clamp(46px,7vw,92px);line-height:.98;letter-spacing:-.065em;margin:22px 0 26px}.hero-copy{font-size:17px;line-height:1.8;color:#b8babf;max-width:720px}.hero-bottom{position:absolute;left:64px;right:64px;bottom:50px;display:flex;justify-content:space-between;align-items:flex-end;gap:32px}.stats{display:flex;gap:38px}.stat b{font-size:28px;display:block}.stat span{font-size:10px;color:#8f9196}.searchbox{width:min(430px,42vw);height:52px;background:#fff;border-radius:16px;display:flex;align-items:center;padding:0 16px;color:#111}.searchbox svg{width:18px;height:18px;opacity:.55}.searchbox input{border:0;outline:0;width:100%;height:100%;padding:0 11px;background:transparent;font-size:13px}.toolbar{padding:34px 0 16px;display:flex;align-items:end;justify-content:space-between;gap:20px}.toolbar h2{font-size:28px;margin:0 0 5px}.toolbar p{font-size:12px;color:#8b8d92;margin:0}.filters{display:flex;gap:7px;flex-wrap:wrap}.filter{border:1px solid #dededb;background:#fff;border-radius:999px;padding:9px 13px;font-size:11px;color:#666;cursor:pointer}.filter.active,.filter:hover{background:#111;color:#fff;border-color:#111}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;padding-bottom:86px}.tool{background:#fff;border:1px solid var(--line);border-radius:27px;padding:22px;min-height:332px;display:flex;flex-direction:column;transition:.2s}.tool:hover{transform:translateY(-4px);box-shadow:var(--shadow)}.tool.hide{display:none}.rank{display:flex;justify-content:space-between;font-size:10px;color:#9b9da1;font-weight:750}.rank-num{font-size:13px;color:#111}.icon{width:68px;height:68px;border-radius:20px;background:#0b0c0d;color:#fff;display:grid;place-items:center;font-size:14px;font-weight:850;margin:28px 0 22px}.tool h3{font-size:25px;margin:0 0 9px}.tagline{font-size:13px;line-height:1.7;color:#74767b;min-height:44px}.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:15px}.chip{background:#f2f2ef;border-radius:999px;padding:6px 9px;font-size:10px;color:#6d6f73}.footrow{display:flex;justify-content:space-between;align-items:end;margin-top:auto;padding-top:22px;border-top:1px solid #efefec}.downloads b{font-size:19px}.downloads span{font-size:9px;color:#9a9ca0;display:block}.arrow{width:38px;height:38px;border-radius:50%;background:#111;color:#fff;display:grid;place-items:center;transition:.15s}.tool:hover .arrow{transform:rotate(45deg)}.empty{display:none;background:#fff;border:1px dashed #d6d6d2;border-radius:24px;padding:52px;text-align:center;color:#888;grid-column:1/-1}.footer{border-top:1px solid #dfdfdc;padding:30px 0 46px;font-size:10px;color:#989a9f;display:flex;justify-content:space-between}.detail-hero{padding:56px 0 34px}.back{display:inline-flex;font-size:11px;color:#777;margin-bottom:30px}.product{display:grid;grid-template-columns:1fr 330px;gap:64px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:36px;padding:58px}.product-icon{width:260px;height:260px;border-radius:58px;background:#0b0c0d;color:#fff;display:grid;place-items:center;font-size:44px;font-weight:850;justify-self:end}.eyebrow{font-size:10px;font-weight:760;letter-spacing:.14em;color:#8c8e93}.product h1{font-size:clamp(48px,6vw,76px);letter-spacing:-.06em;margin:12px 0 14px}.lead{font-size:18px;line-height:1.7;color:#6e7075}.facts{display:flex;gap:28px;margin:28px 0}.fact b{display:block;font-size:18px}.fact span{font-size:9px;color:#999}.btn{display:inline-flex;align-items:center;justify-content:center;height:47px;padding:0 20px;border-radius:12px;background:#111;color:#fff;border:0;font-weight:720;font-size:12px;cursor:pointer}.btn.secondary{background:#fff;color:#111;border:1px solid #d6d6d2}.detail-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:16px;padding-bottom:80px}.panel{background:#fff;border:1px solid var(--line);border-radius:25px;padding:28px}.panel h2{margin:0 0 16px;font-size:20px}.panel p{font-size:13px;line-height:1.9;color:#62646a;white-space:pre-line}.release-meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.meta-item{background:#f5f5f2;border-radius:14px;padding:13px}.meta-item b{font-size:12px;display:block}.meta-item span{font-size:9px;color:#94969b}.loginwrap{min-height:100vh;display:grid;place-items:center;padding:24px}.login{width:min(420px,100%);background:#fff;border:1px solid var(--line);border-radius:26px;padding:34px}.field{margin-bottom:12px}.field label{display:block;font-size:11px;color:#777;margin-bottom:6px}.field input,.field textarea{width:100%;border:1px solid #d7d7d3;border-radius:10px;padding:0 11px}.field input{height:42px}.field textarea{height:105px;padding-top:10px}.admin{max-width:1180px;margin:auto;padding:34px 22px 70px}.adminhead{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:21px}.table{width:100%;border-collapse:collapse}.table th,.table td{text-align:left;border-bottom:1px solid #eee;padding:10px 8px;font-size:11px}.msg{font-size:11px;min-height:18px;margin-top:8px}@media(max-width:950px){.grid{grid-template-columns:1fr 1fr}.product{grid-template-columns:1fr 240px}.detail-grid,.cards{grid-template-columns:1fr}}@media(max-width:680px){.shell{width:min(100% - 28px,1280px)}.hero-card{min-height:560px;border-radius:28px;padding:38px 26px}.hero-bottom{left:26px;right:26px;bottom:28px;display:block}.stats{margin-bottom:20px}.searchbox{width:100%}.toolbar{display:block}.filters{margin-top:16px}.grid{grid-template-columns:1fr}.product{grid-template-columns:1fr;padding:28px}.product-icon{justify-self:start;width:130px;height:130px;border-radius:32px;font-size:24px}.facts{flex-wrap:wrap}.footer{flex-direction:column;gap:8px}}
 '''
+JS=r'''<script>(()=>{const input=document.getElementById('tool-search');const buttons=[...document.querySelectorAll('.filter')];const cards=[...document.querySelectorAll('.tool')];const empty=document.getElementById('empty-state');let category='all';function apply(){const q=(input?.value||'').trim().toLowerCase();let visible=0;cards.forEach(card=>{const show=(!q||(card.dataset.search||'').includes(q))&&(category==='all'||card.dataset.category===category);card.classList.toggle('hide',!show);if(show)visible++});if(empty)empty.style.display=visible?'none':'block'}input?.addEventListener('input',apply);buttons.forEach(btn=>btn.addEventListener('click',()=>{category=btn.dataset.category;buttons.forEach(b=>b.classList.toggle('active',b===btn));apply()}))})();</script>'''
+def page(body,title="深圳院设计100% · 工具开发板",extra=""): return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0b0c"><title>{esc(title)}</title><style>{CSS}</style></head><body>{body}{extra}</body></html>'
+def nav(): return '<div class="nav-wrap"><div class="shell"><nav class="nav"><a class="brand" href="/"><div class="mark">100%</div><div class="brand-title">深圳院设计100%<small>TOOL DEVELOPMENT BOARD</small></div></a><div class="navlinks"><a href="/#tools">工具</a><a href="/#about">关于</a><a class="admin-link" href="/manage">管理</a></div></nav></div></div>'
 
-
-def page(body, title="深圳院设计100% · 工具开发板"):
-    return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>{CSS}</style></head><body>{body}</body></html>'
-
-
-@app.get("/", response_class=HTMLResponse)
+@app.get("/",response_class=HTMLResponse)
 def home():
     init_db()
     with db() as conn:
-        tools = conn.execute("SELECT * FROM tools WHERE active=1 ORDER BY downloads DESC,id ASC").fetchall()
-        total = sum(int(t["downloads"] or 0) for t in tools)
-        cards = []
-        for i, t in enumerate(tools, 1):
-            rel = latest_release(conn, t["id"])
-            version = rel["version"] if rel else "待发布"
-            cards.append(f'''<a class="tool" href="/tools/{t['slug']}"><div class="rank">#{i:02d} · DOWNLOAD RANK</div><div class="icon">{t['icon_text']}</div><h3>{t['name']}</h3><div class="tagline">{t['tagline']}</div><div class="chips"><span class="chip">{t['category']}</span><span class="chip">{t['platform']}</span><span class="chip">v{version}</span></div><div class="footrow"><div class="downloads"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="arrow">↗</div></div></a>''')
-    body=f'''<div class="shell"><nav class="nav"><a class="brand" href="/"><div class="mark">100%</div><div>深圳院设计100%<small>TOOL DEVELOPMENT BOARD</small></div></a><a href="/manage" style="font-size:12px;color:#888">管理</a></nav><section class="hero"><div class="eyebrow">DESIGN × TECHNOLOGY × PRODUCTIVITY</div><h1>把重复工作，<br>交给工具。</h1><p>深圳院设计100% · 工具开发板，持续发布面向真实设计生产流程的小工具。让设计师把更多时间留给判断、创意和设计本身。</p><div class="summary"><div><b>{len(tools)}</b><span>已发布工具</span></div><div><b>{total:,}</b><span>累计下载</span></div></div></section><div class="sectionhead"><h2>工具排行</h2><span>按累计下载量排序</span></div><main class="grid">{''.join(cards)}</main><footer class="footer"><span>深圳院设计100% · 工具开发板</span><span>Internal Design Tools</span></footer></div>'''
-    return HTMLResponse(page(body), headers={"Cache-Control":"no-cache"})
+        tools=conn.execute("SELECT * FROM tools WHERE active=1 ORDER BY downloads DESC,id ASC").fetchall(); total=sum(int(t['downloads'] or 0) for t in tools); categories=[]; cards=[]
+        for t in tools:
+            c=t['category'] or '效率工具'
+            if c not in categories: categories.append(c)
+        for i,t in enumerate(tools,1):
+            rel=latest_release(conn,t['id']); version=rel['version'] if rel else '待发布'; search_text=f"{t['name']} {t['tagline']} {t['category']} {t['platform']}".lower()
+            cards.append(f'<a class="tool" href="/tools/{esc(t["slug"])}" data-category="{esc(t["category"])}" data-search="{esc(search_text)}"><div class="rank"><span>DOWNLOAD RANK</span><span class="rank-num">#{i:02d}</span></div><div class="icon">{esc(t["icon_text"])}</div><h3>{esc(t["name"])}</h3><div class="tagline">{esc(t["tagline"])}</div><div class="chips"><span class="chip">{esc(t["category"])}</span><span class="chip">{esc(t["platform"])}</span><span class="chip">v{esc(version)}</span></div><div class="footrow"><div class="downloads"><b>{int(t["downloads"]):,}</b><span>累计下载</span></div><div class="arrow">↗</div></div></a>')
+    filters=['<button class="filter active" data-category="all">全部</button>']+[f'<button class="filter" data-category="{esc(c)}">{esc(c)}</button>' for c in categories]
+    body=nav()+f'<div class="shell"><section class="hero"><div class="hero-card"><div class="hero-kicker">DESIGN × TECHNOLOGY × PRODUCTIVITY</div><h1>100% 工具开发板</h1><div class="hero-copy">把设计生产中的重复劳动，沉淀成每个人都能直接使用的工具。<br>让设计师把更多时间留给判断、创意与设计本身。</div><div class="hero-bottom"><div class="stats"><div class="stat"><b>{len(tools)}</b><span>已发布工具</span></div><div class="stat"><b>{total:,}</b><span>累计下载</span></div></div><label class="searchbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.2-4.2"></path></svg><input id="tool-search" placeholder="搜索工具、分类或关键词"></label></div></div></section><section id="tools"><div class="toolbar"><div><h2>工具排行</h2><p>按累计下载量自动排序 · 点击进入工具详情</p></div><div class="filters">{"".join(filters)}</div></div><main class="grid">{"".join(cards)}<div id="empty-state" class="empty">没有找到匹配的工具。</div></main></section><footer id="about" class="footer"><span><strong>深圳院设计100%</strong> · 工具开发板</span><span>面向真实设计生产流程持续迭代 · Internal Design Tools</span></footer></div>'
+    return HTMLResponse(page(body,extra=JS),headers={"Cache-Control":"no-cache"})
 
-
-@app.get("/tools/{slug}", response_class=HTMLResponse)
-def detail(slug: str):
-    with db() as conn:
-        t=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
-        if not t: raise HTTPException(status_code=404, detail="工具不存在。")
-        rel=latest_release(conn,t["id"])
-    version=rel["version"] if rel else "待发布"
-    notes=rel["notes"] if rel else "暂无版本说明。"
-    download=f'<a class="btn" href="/tools/{slug}/download">下载 v{version}</a>' if rel else '<span class="btn" style="background:#bbb">安装包待发布</span>'
-    body=f'''<div class="shell"><nav class="nav"><a class="brand" href="/"><div class="mark">100%</div><div>深圳院设计100%<small>TOOL DEVELOPMENT BOARD</small></div></a></nav><section class="detail"><div><a href="/" style="font-size:12px;color:#777">← 返回工具开发板</a><div class="eyebrow" style="margin-top:28px">{t['category']} · {t['platform']}</div><h1>{t['name']}</h1><div class="lead">{t['tagline']}</div><div class="facts"><div class="fact"><b>v{version}</b><span>当前版本</span></div><div class="fact"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="fact"><b>{t['platform']}</b><span>运行平台</span></div></div>{download}</div><div class="bigicon">{t['icon_text']}</div></section><section class="content"><div class="panel"><h2>工具介绍</h2><p>{t['description']}</p></div><div class="panel"><h2>当前版本</h2><p><b>v{version}</b>\n\n{notes}</p></div></section></div>'''
-    return HTMLResponse(page(body, f"{t['name']} · 深圳院设计100%"))
-
-
-@app.get("/tools/{slug}/download")
-def download(slug: str):
+@app.get("/tools/{slug}",response_class=HTMLResponse)
+def detail(slug:str):
     with db() as conn:
         t=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
         if not t: raise HTTPException(status_code=404,detail="工具不存在。")
-        rel=latest_release(conn,t["id"])
-        if not rel: raise HTTPException(status_code=404,detail="安装包尚未发布。")
-        path=Path(rel["package_path"])
-        if not path.exists(): raise HTTPException(status_code=404,detail="安装包文件不存在。")
-        conn.execute("UPDATE tools SET downloads=downloads+1,updated_at=? WHERE id=?",(now_text(),t["id"]))
-    return FileResponse(path=str(path),filename=rel["package_name"],media_type="application/octet-stream")
+        rel=latest_release(conn,t['id'])
+    version=rel['version'] if rel else '待发布'; notes=rel['notes'] if rel else '暂无版本说明。'; size=format_bytes(rel['size']) if rel else '—'; published=rel['published_at'][:10] if rel and rel['published_at'] else '—'; download=f'<a class="btn" href="/tools/{esc(slug)}/download">下载 Windows 版 · v{esc(version)}</a>' if rel else '<span class="btn" style="background:#b4b4b0">安装包待发布</span>'
+    body=nav()+f'<div class="shell"><section class="detail-hero"><a class="back" href="/">← 返回工具开发板</a><div class="product"><div><div class="eyebrow">{esc(t["category"])} · {esc(t["platform"])}</div><h1>{esc(t["name"])}</h1><div class="lead">{esc(t["tagline"])}</div><div class="facts"><div class="fact"><b>v{esc(version)}</b><span>当前版本</span></div><div class="fact"><b>{int(t["downloads"]):,}</b><span>累计下载</span></div><div class="fact"><b>{esc(t["platform"])}</b><span>运行平台</span></div></div>{download}</div><div class="product-icon">{esc(t["icon_text"])}</div></div></section><section class="detail-grid"><div class="panel"><h2>工具介绍</h2><p>{esc(t["description"])}</p></div><div class="panel"><h2>当前版本</h2><p><b>v{esc(version)}</b>\n\n{esc(notes)}</p><div class="release-meta"><div class="meta-item"><b>{esc(published)}</b><span>发布日期</span></div><div class="meta-item"><b>{esc(size)}</b><span>安装包大小</span></div></div></div></section></div>'
+    return HTMLResponse(page(body,f'{t["name"]} · 深圳院设计100%'))
 
-
-@app.get("/manage", response_class=HTMLResponse)
-def manage(request: Request):
-    if not valid_session(request):
-        body='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>工具开发板管理</h1><form id="f"><div class="field"><label>管理密码</label><input id="p" type="password" autofocus></div><button class="btn" type="submit">进入后台</button><div id="m" class="msg"></div></form></div></div><script>f.onsubmit=async e=>{e.preventDefault();let r=await fetch('/manage/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p.value})});let j=await r.json().catch(()=>({}));if(r.ok)location.href='/manage';else m.textContent=j.detail||'登录失败';}</script>'''
-        return HTMLResponse(page(body,"工具开发板管理"))
+@app.get("/tools/{slug}/download")
+def download(slug:str):
     with db() as conn:
-        tools=conn.execute("SELECT * FROM tools ORDER BY id DESC").fetchall()
-        rows=''.join([f"<tr><td>{t['name']}</td><td>{t['slug']}</td><td>{t['category']}</td><td>{t['downloads']}</td><td><a href='/tools/{t['slug']}'>查看</a></td></tr>" for t in tools])
-    body=f'''<div class="admin"><div class="adminhead"><div><div class="eyebrow">DESIGN 100</div><h1 style="margin:6px 0 0">工具开发板管理</h1></div><button class="btn secondary" onclick="fetch('/manage/logout',{{method:'POST'}}).then(()=>location.href='/manage')">退出</button></div><div class="cards"><div class="card"><h2>新增工具</h2><form action="/manage/tools" method="post"><div class="field"><label>工具名称</label><input name="name" required></div><div class="field"><label>URL 标识</label><input name="slug" placeholder="例如 pdf-tool" required></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><button class="btn">新增工具</button></form></div><div class="card"><h2>发布版本</h2><form action="/manage/releases" method="post" enctype="multipart/form-data"><div class="field"><label>工具 slug</label><input name="slug" placeholder="cad-100" required></div><div class="field"><label>版本号</label><input name="version" placeholder="2.1.0" required></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包</label><input name="package" type="file" required></div><button class="btn">发布版本</button></form></div></div><div class="card" style="margin-top:16px"><h2>已发布工具</h2><table class="table"><thead><tr><th>名称</th><th>Slug</th><th>分类</th><th>下载量</th><th></th></tr></thead><tbody>{rows}</tbody></table></div></div>'''
+        t=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
+        if not t: raise HTTPException(status_code=404,detail="工具不存在。")
+        rel=latest_release(conn,t['id'])
+        if not rel: raise HTTPException(status_code=404,detail="安装包尚未发布。")
+        path=Path(rel['package_path'])
+        if not path.exists(): raise HTTPException(status_code=404,detail="安装包文件不存在。")
+        conn.execute("UPDATE tools SET downloads=downloads+1,updated_at=? WHERE id=?",(now_text(),t['id']))
+    return FileResponse(path=str(path),filename=rel['package_name'],media_type="application/octet-stream")
+
+@app.get("/manage",response_class=HTMLResponse)
+def manage(request:Request):
+    if not valid_session(request):
+        return HTMLResponse(page('<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>工具开发板管理</h1><form id="f"><div class="field"><label>管理密码</label><input id="p" type="password" autofocus></div><button class="btn" type="submit">进入后台</button><div id="m" class="msg"></div></form></div></div><script>document.getElementById("f").addEventListener("submit",async e=>{e.preventDefault();const r=await fetch("/manage/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:document.getElementById("p").value})});if(r.ok)location.href="/manage";else document.getElementById("m").textContent="登录失败"})</script>',"工具开发板管理"))
+    with db() as conn:
+        tools=conn.execute("SELECT * FROM tools ORDER BY downloads DESC,id DESC").fetchall(); rows=''.join([f'<tr><td>{esc(t["name"])}</td><td>{esc(t["slug"])}</td><td>{esc(t["category"])}</td><td>{int(t["downloads"]):,}</td><td><a href="/tools/{esc(t["slug"])}">查看</a></td></tr>' for t in tools])
+    body=f'<div class="admin"><div class="adminhead"><div><div class="eyebrow">DESIGN 100</div><h1>工具开发板管理</h1></div><button class="btn secondary" onclick="fetch(\'/manage/logout\',{{method:\'POST\'}}).then(()=>location.href=\'/manage\')">退出</button></div><div class="cards"><div class="card"><h2>新增工具</h2><form action="/manage/tools" method="post"><div class="field"><label>工具名称</label><input name="name" required></div><div class="field"><label>URL 标识</label><input name="slug" required></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><button class="btn">新增工具</button></form></div><div class="card"><h2>发布版本</h2><form action="/manage/releases" method="post" enctype="multipart/form-data"><div class="field"><label>工具 slug</label><input name="slug" required></div><div class="field"><label>版本号</label><input name="version" required></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包</label><input name="package" type="file" required></div><button class="btn">发布版本</button></form></div></div><div class="card" style="margin-top:16px"><table class="table"><thead><tr><th>名称</th><th>Slug</th><th>分类</th><th>下载量</th><th></th></tr></thead><tbody>{rows}</tbody></table></div></div>'
     return HTMLResponse(page(body,"工具开发板管理"))
 
-
 @app.post("/manage/login")
-async def manage_login(request: Request):
-    if not ADMIN_PASSWORD:
-        raise HTTPException(status_code=503,detail="后台密码未配置。")
+async def manage_login(request:Request):
+    if not ADMIN_PASSWORD: raise HTTPException(status_code=503,detail="后台密码未配置。")
     data=await request.json()
-    if not hmac.compare_digest(str(data.get("password","")),ADMIN_PASSWORD):
-        raise HTTPException(status_code=401,detail="密码不正确。")
-    resp=JSONResponse({"success":True})
-    resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite="strict",max_age=8*3600)
-    return resp
-
-
+    if not hmac.compare_digest(str(data.get("password","")),ADMIN_PASSWORD): raise HTTPException(status_code=401,detail="密码不正确。")
+    resp=JSONResponse({"success":True}); resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite="strict",max_age=8*3600); return resp
 @app.post("/manage/logout")
-def manage_logout():
-    resp=JSONResponse({"success":True})
-    resp.delete_cookie(COOKIE_NAME)
-    return resp
-
-
+def manage_logout(): resp=JSONResponse({"success":True}); resp.delete_cookie(COOKIE_NAME); return resp
 @app.post("/manage/tools")
-def create_tool(request: Request,name: str=Form(...),slug: str=Form(...),tagline: str=Form(""),description: str=Form(""),category: str=Form("效率工具"),platform: str=Form("Windows"),icon_text: str=Form("100")):
-    require_admin(request)
-    now=now_text()
+def create_tool(request:Request,name:str=Form(...),slug:str=Form(...),tagline:str=Form(""),description:str=Form(""),category:str=Form("效率工具"),platform:str=Form("Windows"),icon_text:str=Form("100")):
+    require_admin(request); now=now_text()
     try:
-        with db() as conn:
-            conn.execute("""INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)""",(slug.strip(),name.strip(),tagline.strip(),description.strip(),category.strip(),platform.strip(),icon_text.strip(),now,now))
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=409,detail="slug 已存在。")
+        with db() as conn: conn.execute("INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",(slug.strip(),name.strip(),tagline.strip(),description.strip(),category.strip(),platform.strip(),icon_text.strip(),now,now))
+    except sqlite3.IntegrityError: raise HTTPException(status_code=409,detail="slug 已存在。")
     return RedirectResponse('/manage',status_code=303)
-
-
 @app.post("/manage/releases")
-async def create_release(request: Request,slug: str=Form(...),version: str=Form(...),notes: str=Form(""),package: UploadFile=File(...)):
-    require_admin(request)
-    content=await package.read()
+async def create_release(request:Request,slug:str=Form(...),version:str=Form(...),notes:str=Form(""),package:UploadFile=File(...)):
+    require_admin(request); content=await package.read()
     if not content: raise HTTPException(status_code=400,detail="安装包不能为空。")
     with db() as conn:
         t=conn.execute("SELECT * FROM tools WHERE slug=?",(slug.strip(),)).fetchone()
         if not t: raise HTTPException(status_code=404,detail="工具不存在。")
-        safe_name=(package.filename or f"{slug}-{version}.zip").replace('/','_').replace('\\','_')
-        tool_dir=PACKAGE_DIR / slug.strip()
-        tool_dir.mkdir(parents=True,exist_ok=True)
-        path=tool_dir / safe_name
-        path.write_bytes(content)
-        digest=hashlib.sha256(content).hexdigest()
-        conn.execute("UPDATE releases SET active=0 WHERE tool_id=?",(t['id'],))
-        conn.execute("""INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)""",(t['id'],version.strip(),notes.strip(),safe_name,str(path),digest,len(content),now_text()))
+        safe_name=(package.filename or f"{slug}-{version}.zip").replace('/','_').replace('\\','_'); tool_dir=PACKAGE_DIR/slug.strip(); tool_dir.mkdir(parents=True,exist_ok=True); path=tool_dir/safe_name; path.write_bytes(content); digest=hashlib.sha256(content).hexdigest(); conn.execute("UPDATE releases SET active=0 WHERE tool_id=?",(t['id'],)); conn.execute("INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)",(t['id'],version.strip(),notes.strip(),safe_name,str(path),digest,len(content),now_text()))
     return RedirectResponse('/manage',status_code=303)
