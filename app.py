@@ -5,6 +5,7 @@ import admin_portal
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
+HERO_TITLE = "Desgin 100%"
 
 
 def brand_text(value: str) -> str:
@@ -24,8 +25,15 @@ _original_page = public_site.page
 
 
 def branded_page(body, title=SITE_TITLE, extra=""):
+    branded_body = brand_text(body)
+    # The large homepage hero is a product title, separate from the site brand.
+    branded_body = branded_body.replace(
+        f"<h1>{BRAND_NAME}</h1>",
+        f"<h1>{HERO_TITLE}</h1>",
+        1,
+    )
     return _original_page(
-        brand_text(body),
+        branded_body,
         brand_text(title),
         extra,
     )
