@@ -3,7 +3,7 @@ import hmac
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from app_v2 import ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, session_token, valid_session
+from app_v2 import ADMIN_USERNAME, ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, session_token, valid_session
 
 app = FastAPI(title="Design 100 Admin", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -27,7 +27,7 @@ def require_admin(request: Request):
 def dashboard(request: Request):
     init_db()
     if not valid_session(request):
-        login='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>管理后台</h1><form id="f"><div class="field"><label>管理密码</label><input id="p" type="password" autofocus></div><button class="btn">进入后台</button><div id="m" class="msg"></div></form></div></div><script>document.getElementById("f").addEventListener("submit",async e=>{e.preventDefault();const r=await fetch("/manage/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:document.getElementById("p").value})});const j=await r.json().catch(()=>({}));if(r.ok)location.href="/manage/";else document.getElementById("m").textContent=j.detail||"登录失败"})</script>'''
+        login='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>管理员登录</h1><form id="f"><div class="field"><label>管理员用户名</label><input id="u" autocomplete="username" autofocus></div><div class="field"><label>管理员密码</label><input id="p" type="password" autocomplete="current-password"></div><button class="btn">进入后台</button><div id="m" class="msg"></div></form></div></div><script>document.getElementById("f").addEventListener("submit",async e=>{e.preventDefault();const r=await fetch("/manage/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:document.getElementById("u").value,password:document.getElementById("p").value})});const j=await r.json().catch(()=>({}));if(r.ok)location.href="/manage/";else document.getElementById("m").textContent=j.detail||"登录失败"})</script>'''
         return HTMLResponse(admin_page(login))
     with db() as conn:
         pending=conn.execute("SELECT COUNT(*) c FROM tool_submissions WHERE status='pending'").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tool_submissions'").fetchone() else 0
@@ -70,9 +70,13 @@ def tool_admin(request: Request, slug: str):
 
 @app.post('/login')
 async def login(request: Request):
-    if not ADMIN_PASSWORD: raise HTTPException(503,"后台密码未配置。")
+    if not ADMIN_PASSWORD:
+        raise HTTPException(503,"后台账号未配置。")
     data=await request.json()
-    if not hmac.compare_digest(str(data.get('password','')),ADMIN_PASSWORD): raise HTTPException(401,"密码不正确。")
+    username=str(data.get('username','')).strip()
+    password=str(data.get('password',''))
+    if not hmac.compare_digest(username,ADMIN_USERNAME) or not hmac.compare_digest(password,ADMIN_PASSWORD):
+        raise HTTPException(401,"管理员用户名或密码不正确。")
     resp=JSONResponse({'success':True}); resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite='strict',max_age=8*3600); return resp
 
 
