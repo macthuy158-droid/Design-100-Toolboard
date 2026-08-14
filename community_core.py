@@ -38,7 +38,6 @@ def verify_password(password: str, salt: str, expected: str):
 
 
 def _migrate_legacy_slugs(conn):
-    """Migrate old URL-unsafe slugs without changing product display names."""
     legacy = conn.execute("SELECT id,slug FROM tools WHERE slug=?", ("文本100%",)).fetchone()
     target = conn.execute("SELECT id FROM tools WHERE slug=?", ("text-100",)).fetchone()
     if legacy and not target:
@@ -47,8 +46,7 @@ def _migrate_legacy_slugs(conn):
 
 
 def _backfill_legacy_tool_owners(conn):
-    """Bind legacy tools to the first developer whose approved submission updated them."""
-    tools = conn.execute("SELECT id,developer_name FROM tools WHERE owner_user_id IS NULL").fetchall()
+    tools = conn.execute("SELECT id FROM tools WHERE owner_user_id IS NULL").fetchall()
     for tool in tools:
         first = conn.execute(
             "SELECT s.user_id,u.display_name FROM tool_submissions s "
@@ -61,6 +59,33 @@ def _backfill_legacy_tool_owners(conn):
                 "UPDATE tools SET owner_user_id=?,developer_name=?,updated_at=? WHERE id=?",
                 (first["user_id"], first["display_name"], now(), tool["id"]),
             )
+
+
+def _install_submission_guards(conn):
+    conn.executescript('''
+    DROP TRIGGER IF EXISTS trg_release_owner_guard;
+    CREATE TRIGGER trg_release_owner_guard
+    BEFORE UPDATE OF status ON tool_submissions
+    WHEN NEW.status='approved' AND OLD.status<>'approved' AND NEW.submission_type='new_release'
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM tools
+        WHERE id=NEW.tool_id AND owner_user_id=NEW.user_id
+      ) THEN RAISE(ABORT, 'only tool owner can approve a release') END;
+    END;
+
+    DROP TRIGGER IF EXISTS trg_release_price_sync;
+    CREATE TRIGGER trg_release_price_sync
+    AFTER UPDATE OF status ON tool_submissions
+    WHEN NEW.status='approved' AND OLD.status<>'approved' AND NEW.submission_type='new_release'
+    BEGIN
+      UPDATE tools
+      SET price_cents=NEW.price_cents,
+          developer_name=(SELECT display_name FROM community_users WHERE id=NEW.user_id),
+          updated_at=COALESCE(NEW.reviewed_at, NEW.created_at)
+      WHERE id=NEW.tool_id;
+    END;
+    ''')
 
 
 def init_db():
@@ -162,6 +187,7 @@ def init_db():
             conn.execute("ALTER TABLE tools ADD COLUMN developer_name TEXT NOT NULL DEFAULT ''")
         _migrate_legacy_slugs(conn)
         _backfill_legacy_tool_owners(conn)
+        _install_submission_guards(conn)
 
 
 def make_session(user_id: int):
@@ -201,8 +227,6 @@ def can_download(conn, user, tool):
         return False
     if user['role'] == ROLE_XIAOFEIXIA:
         return True
-    # Peer users must have a genuinely paid order. Old zero-yuan/free grants do
-    # not count, preventing accidental free access after a pricing mistake.
     return bool(conn.execute(
         "SELECT e.id FROM entitlements e JOIN orders o ON o.id=e.order_id "
         "WHERE e.user_id=? AND e.tool_id=? AND o.status='paid' AND o.amount_cents>0 LIMIT 1",
