@@ -11,7 +11,7 @@ import community_core as core
 router = APIRouter()
 
 EXTRA_CSS = '''<style>
-.memberbar{display:flex;gap:8px;align-items:center}.member-pill{padding:8px 12px;border-radius:999px;background:#fff;border:1px solid #dededb;font-size:11px}.community-wrap{width:min(920px,calc(100% - 36px));margin:42px auto 80px}.community-card{background:#fff;border:1px solid #e6e6e3;border-radius:24px;padding:26px;margin-bottom:16px}.community-card h1,.community-card h2{margin-top:0}.community-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.review{padding:15px 0;border-top:1px solid #eee}.review:first-of-type{border-top:0}.stars{letter-spacing:2px;font-size:13px}.notice{padding:12px 14px;border-radius:12px;background:#f3f3f0;font-size:11px;color:#666;margin-bottom:15px}.price{font-size:24px;font-weight:760}.role{font-size:10px;padding:5px 8px;border-radius:999px;background:#111;color:#fff}.dev-actions{display:flex;gap:8px;flex-wrap:wrap}@media(max-width:700px){.community-grid{grid-template-columns:1fr}}</style>'''
+.memberbar{display:flex;gap:8px;align-items:center}.member-pill{padding:8px 12px;border-radius:999px;background:#fff;border:1px solid #dededb;font-size:11px}.community-wrap{width:min(980px,calc(100% - 36px));margin:42px auto 80px}.community-card{background:#fff;border:1px solid #e6e6e3;border-radius:24px;padding:26px;margin-bottom:16px}.community-card h1,.community-card h2{margin-top:0}.community-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.review{padding:15px 0;border-top:1px solid #eee}.review:first-of-type{border-top:0}.stars{letter-spacing:2px;font-size:13px}.notice{padding:12px 14px;border-radius:12px;background:#f3f3f0;font-size:11px;color:#666;margin-bottom:15px}.price{font-size:24px;font-weight:760}.role{font-size:10px;padding:5px 8px;border-radius:999px;background:#111;color:#fff}.dev-actions{display:flex;gap:8px;flex-wrap:wrap}.dev-tools{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0 24px}.dev-tool{border:1px solid #e8e8e5;border-radius:19px;padding:18px;background:#fbfbfa}.dev-tool-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.dev-tool h3{margin:0 0 5px;font-size:19px}.dev-tool-sub{font-size:10px;color:#8c8e92}.dev-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:15px 0}.dev-stat{background:#f0f0ed;border-radius:12px;padding:10px;min-width:0}.dev-stat b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dev-stat span{display:block;font-size:8px;color:#92949a;margin-top:2px}.status-dot{font-size:9px;border-radius:999px;padding:5px 8px;background:#ebf4ec;color:#2f6f3b;white-space:nowrap}.status-dot.off{background:#f3e5e5;color:#8b3535}.section-title{font-size:13px;color:#777;font-weight:720;margin:24px 0 10px}.table-wrap{overflow-x:auto}.small-link{font-size:10px;color:#555;text-decoration:underline;text-underline-offset:3px}.muted{font-size:11px;color:#888;line-height:1.7}@media(max-width:700px){.community-grid,.dev-tools{grid-template-columns:1fr}.dev-stats{grid-template-columns:1fr 1fr}}</style>'''
 
 
 def page(body, title="小飞侠设计100%"):
@@ -84,16 +84,43 @@ def logout():
 
 @router.get("/me", response_class=HTMLResponse)
 def me(request: Request):
+    core.init_db()
     user=login_required(request)
     with site.db() as conn:
         orders=conn.execute("SELECT o.*,t.name FROM orders o JOIN tools t ON t.id=o.tool_id WHERE o.user_id=? ORDER BY o.id DESC",(user['id'],)).fetchall()
         submissions=conn.execute("SELECT * FROM tool_submissions WHERE user_id=? ORDER BY id DESC",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
-        owned=conn.execute("SELECT name,slug,price_cents FROM tools WHERE owner_user_id=? AND active=1 ORDER BY name",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
+        owned=conn.execute('''
+            SELECT t.*,
+                   (SELECT version FROM releases r WHERE r.tool_id=t.id AND r.active=1 ORDER BY r.id DESC LIMIT 1) current_version,
+                   (SELECT COUNT(*) FROM reviews r WHERE r.tool_id=t.id) review_count,
+                   (SELECT ROUND(AVG(rating),1) FROM reviews r WHERE r.tool_id=t.id) avg_rating,
+                   (SELECT COUNT(*) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0) paid_orders,
+                   (SELECT COALESCE(SUM(amount_cents),0) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0) paid_amount
+            FROM tools t WHERE t.owner_user_id=? ORDER BY t.active DESC,t.name
+        ''',(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
+
     order_rows=''.join(f'<tr><td>{site.esc(o["name"])}</td><td>¥{o["amount_cents"]/100:.2f}</td><td>{site.esc(o["status"])}</td></tr>' for o in orders) or '<tr><td colspan="3">暂无订单</td></tr>'
-    sub_rows=''.join(f'<tr><td>{site.esc(s["name"] or s["version"])}</td><td>{site.esc(s["submission_type"])}</td><td>{site.esc(s["status"])}</td></tr>' for s in submissions) or '<tr><td colspan="3">暂无投稿</td></tr>'
-    owned_rows=''.join(f'<tr><td>{site.esc(t["name"])}</td><td>¥{int(t["price_cents"] or 0)/100:.2f}</td><td><a href="/developer/submit">提交新版本</a></td></tr>' for t in owned) or '<tr><td colspan="3">暂无已归属工具</td></tr>'
-    dev=f'<div class="community-card"><h2>开发者中心</h2><p>可以提交新工具；已有工具的新版本仅限该工具原开发者提交。</p><a class="btn" href="/developer/submit">提交工具 / 新版本</a><h3>我的工具</h3><table class="table"><tbody>{owned_rows}</tbody></table><h3>投稿记录</h3><table class="table"><tbody>{sub_rows}</tbody></table></div>' if user['role']==core.ROLE_XIAOFEIXIA else ''
-    body=f'<div class="community-wrap"><div class="community-card"><span class="role">{core.role_label(user["role"])}</span><h1>{site.esc(user["display_name"])}</h1><p>{site.esc(user["email"] or "院内账号")}</p><form action="/account/logout" method="post"><button class="btn secondary">退出登录</button></form></div>{dev}<div class="community-card"><h2>我的购买</h2><table class="table"><tbody>{order_rows}</tbody></table></div></div>'
+    sub_rows=''.join(f'<tr><td>{site.esc(s["name"] or s["version"])}</td><td>{"新工具" if s["submission_type"]=="new_tool" else "版本更新"}</td><td>{site.esc(s["version"])}</td><td>{site.esc(s["status"])}</td></tr>' for s in submissions) or '<tr><td colspan="4">暂无投稿</td></tr>'
+
+    tool_cards=[]
+    for t in owned:
+        version=t['current_version'] or '待发布'
+        reviews=int(t['review_count'] or 0)
+        rating=f"{float(t['avg_rating']):.1f}" if t['avg_rating'] is not None else '—'
+        paid_orders=int(t['paid_orders'] or 0)
+        paid_amount=int(t['paid_amount'] or 0)/100
+        state='<span class="status-dot">已上架</span>' if t['active'] else '<span class="status-dot off">已下架</span>'
+        tool_cards.append(f'''<div class="dev-tool"><div class="dev-tool-head"><div><h3>{site.esc(t['name'])}</h3><div class="dev-tool-sub">/{site.esc(t['slug'])} · {site.esc(t['platform'])}</div></div>{state}</div>
+        <div class="dev-stats"><div class="dev-stat"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="dev-stat"><b>¥{int(t['price_cents'] or 0)/100:.2f}</b><span>同行售价</span></div><div class="dev-stat"><b>{int(t['downloads'] or 0):,}</b><span>累计下载</span></div><div class="dev-stat"><b>{rating} / 5</b><span>{reviews} 条评价</span></div><div class="dev-stat"><b>{paid_orders}</b><span>已确认购买</span></div><div class="dev-stat"><b>¥{paid_amount:.2f}</b><span>已确认销售额</span></div></div>
+        <div class="dev-actions"><a class="btn" href="/developer/submit?tool={site.esc(t['slug'])}">提交新版本</a><a class="btn secondary" href="/tools/{site.esc(t['slug'])}">查看产品</a></div></div>''')
+
+    dev=''
+    if user['role']==core.ROLE_XIAOFEIXIA:
+        dev=f'''<div class="community-card"><div class="dev-tool-head"><div><h2>开发者中心</h2><p class="muted">每位小飞侠都可以提交新工具；已有工具的新版本只允许该工具原开发者提交。</p></div><a class="btn" href="/developer/submit">提交新工具</a></div>
+        <div class="section-title">我的工具</div><div class="dev-tools">{''.join(tool_cards) if tool_cards else '<div class="notice">暂无已归属工具。提交新工具并审核通过后，会自动出现在这里。</div>'}</div>
+        <div class="section-title">投稿记录</div><div class="table-wrap"><table class="table"><thead><tr><th>工具</th><th>类型</th><th>版本</th><th>状态</th></tr></thead><tbody>{sub_rows}</tbody></table></div></div>'''
+
+    body=f'<div class="community-wrap"><div class="community-card"><span class="role">{core.role_label(user["role"])}</span><h1>{site.esc(user["display_name"])}</h1><p>{site.esc(user["email"] or "院内账号")}</p><form action="/account/logout" method="post"><button class="btn secondary">退出登录</button></form></div>{dev}<div class="community-card"><h2>我的购买</h2><div class="table-wrap"><table class="table"><tbody>{order_rows}</tbody></table></div></div></div>'
     return HTMLResponse(page(body,"我的账号 · 小飞侠设计100%"))
 
 
@@ -137,14 +164,17 @@ def order_page(request: Request, order_id: int):
 
 developer_router=APIRouter()
 
+
 @developer_router.get("/submit", response_class=HTMLResponse)
-def submit_page(request: Request):
+def submit_page(request: Request, tool: str = ""):
     core.init_db(); user=developer_required(request)
     with site.db() as conn:
-        tools=conn.execute("SELECT id,name,slug,price_cents FROM tools WHERE active=1 AND owner_user_id=? ORDER BY name",(user['id'],)).fetchall()
-    opts=''.join(f'<option value="{site.esc(t["slug"])}">{site.esc(t["name"])} · ¥{int(t["price_cents"] or 0)/100:.2f}</option>' for t in tools)
-    body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">新工具可自行提交；已有工具的新版本只允许原开发者提交。同行价格会在审核通过后同步到产品。</div>
-    <form action="/developer/submit" method="post" enctype="multipart/form-data"><div class="field"><label>投稿类型</label><select name="submission_type"><option value="new_tool">新工具</option><option value="new_release">已有工具新版本</option></select></div>
+        tools=conn.execute("SELECT id,name,slug,price_cents FROM tools WHERE owner_user_id=? ORDER BY active DESC,name",(user['id'],)).fetchall()
+    selected_slug=tool.strip()
+    opts=''.join(f'<option value="{site.esc(t["slug"])}" {"selected" if t["slug"]==selected_slug else ""}>{site.esc(t["name"])} · ¥{int(t["price_cents"] or 0)/100:.2f}</option>' for t in tools)
+    default_type='new_release' if selected_slug and any(t['slug']==selected_slug for t in tools) else 'new_tool'
+    body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">新工具可自行提交；已有工具的新版本只允许原开发者提交。价格为产品当前同行售价，审核通过后同步更新。</div>
+    <form action="/developer/submit" method="post" enctype="multipart/form-data"><div class="field"><label>投稿类型</label><select name="submission_type"><option value="new_tool" {"selected" if default_type=="new_tool" else ""}>新工具</option><option value="new_release" {"selected" if default_type=="new_release" else ""}>已有工具新版本</option></select></div>
     <div class="field"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>Slug</label><input name="slug" placeholder="例如 text-100"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div></div><div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>同行价格（元）</label><input name="price_yuan" type="number" min="0.01" step="0.01" required></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
     <div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包</label><input name="package" type="file" required></div><button class="btn">提交审核</button></form></div></div>'''
     return HTMLResponse(page(body,"开发者投稿 · 小飞侠设计100%"))
@@ -158,7 +188,7 @@ async def submit(request: Request, submission_type: str=Form(...), existing_slug
     with site.db() as conn:
         tool=None
         if submission_type=='new_release':
-            tool=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(existing_slug.strip(),)).fetchone()
+            tool=conn.execute("SELECT * FROM tools WHERE slug=?",(existing_slug.strip(),)).fetchone()
             if not tool: raise HTTPException(404,"已有工具不存在。")
             if not core.is_tool_owner(tool,user): raise HTTPException(403,"只有该工具原开发者可以提交新版本。")
             name=tool['name']; slug=tool['slug']; tagline=tool['tagline']; description=tool['description']; category=tool['category']; platform=tool['platform']; icon_text=tool['icon_text']
