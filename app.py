@@ -19,6 +19,7 @@ install_database_connection(public_site)
 import admin_portal  # noqa: E402
 import community_core  # noqa: E402
 import community_portal  # noqa: E402
+import developer_upload  # noqa: E402
 
 # Schema creation/migrations are bootstrap work, not request work. Existing
 # request handlers may still call core.init_db(); the wrapper makes those calls
@@ -131,6 +132,7 @@ def _remove_legacy_admin_routes():
 
 _remove_legacy_admin_routes()
 community_portal.install_public_routes(app)
+developer_upload.install_streaming_submit(community_portal.developer_router)
 
 
 @app.get("/account/session")
