@@ -176,6 +176,15 @@ def init_db():
             release_id INTEGER NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS xiaofeixia_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            real_name TEXT NOT NULL COLLATE NOCASE,
+            used INTEGER NOT NULL DEFAULT 0,
+            used_by_user_id INTEGER,
+            created_at TEXT NOT NULL,
+            used_at TEXT
+        );
         CREATE INDEX IF NOT EXISTS idx_reviews_tool ON reviews(tool_id,id DESC);
         CREATE INDEX IF NOT EXISTS idx_submissions_status ON tool_submissions(status,id DESC);
         CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id,id DESC);
@@ -234,6 +243,75 @@ def can_download(conn, user, tool):
         "WHERE e.user_id=? AND e.tool_id=? AND o.status='paid' AND o.amount_cents>0 LIMIT 1",
         (user['id'], tool['id']),
     ).fetchone())
+
+
+def generate_invite_code():
+    return secrets.token_hex(4).upper()
+
+
+def create_invite(real_name: str):
+    clean = " ".join(real_name.strip().split())
+    if not clean:
+        raise ValueError("姓名不能为空。")
+    code = generate_invite_code()
+    stamp = now()
+    with site.db() as conn:
+        existing = conn.execute(
+            "SELECT code FROM xiaofeixia_invites WHERE real_name=? COLLATE NOCASE AND used=0",
+            (clean,),
+        ).fetchone()
+        if existing:
+            return existing["code"], False
+        conn.execute(
+            "INSERT INTO xiaofeixia_invites(code,real_name,used,created_at) VALUES(?,?,0,?)",
+            (code, clean, stamp),
+        )
+    return code, True
+
+
+def batch_create_invites():
+    if not CAD_LICENSE_DB.exists():
+        raise FileNotFoundError(str(CAD_LICENSE_DB))
+    source = sqlite3.connect(str(CAD_LICENSE_DB))
+    source.row_factory = sqlite3.Row
+    try:
+        names = [r["name"] for r in source.execute("SELECT name FROM users WHERE active=1 ORDER BY id").fetchall()]
+    finally:
+        source.close()
+    created = 0
+    for raw in names:
+        name = " ".join(str(raw).strip().split())
+        if not name:
+            continue
+        _, is_new = create_invite(name)
+        if is_new:
+            created += 1
+    return created
+
+
+def validate_invite(code: str, real_name: str):
+    clean_code = code.strip()
+    clean_name = " ".join(real_name.strip().split())
+    with site.db() as conn:
+        invite = conn.execute(
+            "SELECT * FROM xiaofeixia_invites WHERE code=? COLLATE NOCASE",
+            (clean_code,),
+        ).fetchone()
+    if not invite:
+        return None, "邀请码不存在。"
+    if invite["used"]:
+        return None, "该邀请码已被使用。"
+    if invite["real_name"].lower() != clean_name.lower():
+        return None, "姓名与邀请码不匹配。"
+    return invite, None
+
+
+def mark_invite_used(invite_id: int, user_id: int):
+    with site.db() as conn:
+        conn.execute(
+            "UPDATE xiaofeixia_invites SET used=1,used_by_user_id=?,used_at=? WHERE id=?",
+            (user_id, now(), invite_id),
+        )
 
 
 def import_cad_users():

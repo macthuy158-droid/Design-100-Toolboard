@@ -87,7 +87,7 @@ _original_nav = public_site.nav
 def branded_nav():
     html = brand_text(_original_nav())
     old = '<div class="navlinks"><a href="/#tools">工具</a><a href="/#about">关于</a><a class="admin-link" href="/manage">管理</a></div>'
-    new = '''<div class="navlinks"><a href="/#tools">工具</a><a href="/developer/submit">开发者投稿</a><a href="/account/register">小游侠注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
+    new = '''<div class="navlinks"><a href="/#tools">工具</a><a href="/developer/submit">开发者投稿</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
     return html.replace(old, new)
 
 

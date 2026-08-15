@@ -38,7 +38,7 @@ def login_page(request: Request, next: str = "/"):
     if user:
         return RedirectResponse(next or "/", 303)
     body = f'''<div class="loginwrap"><div class="login"><div class="eyebrow">DESGIN 100%</div><h1>登录</h1>
-    <div class="notice">院内小飞侠：用户名和初始密码均为本人姓名。同行用户请先注册成为小游侠。</div>
+    <div class="notice">院内小飞侠：使用注册时设置的账号密码登录。还没有账号？<a href="/account/register">点此注册</a>。</div>
     <form action="/account/login" method="post"><input type="hidden" name="next" value="{site.esc(next)}"><div class="field"><label>用户名 / 邮箱</label><input name="account" required autofocus></div>
     <div class="field"><label>密码</label><input name="password" type="password" required></div><button class="btn" type="submit">登录</button> <a class="btn secondary" href="/account/register">小游侠注册</a></form></div></div>'''
     return HTMLResponse(page(body,"登录 · 小飞侠设计100%"))
@@ -58,22 +58,41 @@ def login(request: Request, account: str = Form(...), password: str = Form(...),
 
 @router.get("/register", response_class=HTMLResponse)
 def register_page():
-    body='''<div class="loginwrap"><div class="login"><div class="eyebrow">小游侠 · PEER USER</div><h1>注册同行用户</h1>
-    <form action="/account/register" method="post"><div class="field"><label>昵称</label><input name="display_name" required></div><div class="field"><label>邮箱</label><input name="email" type="email" required></div>
-    <div class="field"><label>密码</label><input name="password" type="password" minlength="6" required></div><button class="btn">注册小游侠</button></form></div></div>'''
-    return HTMLResponse(page(body,"小游侠注册 · 小飞侠设计100%"))
+    body='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESGIN 100%</div><h1>注册</h1>
+    <div class="notice">小飞侠：院内开发者，可上传工具、免费下载所有工具。需要邀请码。<br>小游侠：同行用户，可购买并下载工具。</div>
+    <div class="field"><label>选择身份</label><select id="role-select" onchange="document.getElementById('form-xiaofeixia').style.display=this.value==='xiaofeixia'?'block':'none';document.getElementById('form-xiaoyouxia').style.display=this.value==='xiaoyouxia'?'block':'none'"><option value="xiaoyouxia">小游侠（同行用户）</option><option value="xiaofeixia">小飞侠（院内开发者）</option></select></div>
+    <form id="form-xiaoyouxia" action="/account/register" method="post"><input type="hidden" name="role" value="xiaoyouxia"><div class="field"><label>昵称</label><input name="display_name" required></div><div class="field"><label>邮箱</label><input name="email" type="email" required></div><div class="field"><label>密码</label><input name="password" type="password" minlength="6" required></div><button class="btn">注册小游侠</button></form>
+    <form id="form-xiaofeixia" action="/account/register" method="post" style="display:none"><input type="hidden" name="role" value="xiaofeixia"><div class="field"><label>真实姓名（用于验证邀请码）</label><input name="real_name" required></div><div class="field"><label>昵称（对外显示）</label><input name="display_name" placeholder="不填则使用真实姓名"></div><div class="field"><label>邀请码</label><input name="invite_code" required></div><div class="field"><label>设置密码</label><input name="password" type="password" minlength="6" required></div><button class="btn">注册小飞侠</button></form>
+    </div></div>'''
+    return HTMLResponse(page(body,"注册 · 小飞侠设计100%"))
 
 
 @router.post("/register")
-def register(display_name: str = Form(...), email: str = Form(...), password: str = Form(...)):
+def register(request: Request, role: str = Form("xiaoyouxia"), display_name: str = Form(""), email: str = Form(""), password: str = Form(...), real_name: str = Form(""), invite_code: str = Form("")):
     core.init_db()
     if len(password)<6: raise HTTPException(400,"密码至少 6 位。")
-    email=email.strip().lower(); name=display_name.strip(); salt,digest=core.hash_password(password); stamp=core.now()
-    try:
-        with site.db() as conn:
-            cur=conn.execute("INSERT INTO community_users(username,display_name,email,password_salt,password_hash,role,active,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",(email,name,email,salt,digest,core.ROLE_XIAOYOUXIA,stamp,stamp)); uid=cur.lastrowid
-    except Exception:
-        raise HTTPException(409,"这个邮箱已经注册。")
+    salt,digest=core.hash_password(password); stamp=core.now()
+    if role == core.ROLE_XIAOFEIXIA:
+        clean_name = " ".join(real_name.strip().split())
+        if not clean_name: raise HTTPException(400,"请填写真实姓名。")
+        nickname = display_name.strip() or clean_name
+        invite, err = core.validate_invite(invite_code, clean_name)
+        if err: raise HTTPException(400, err)
+        try:
+            with site.db() as conn:
+                cur=conn.execute("INSERT INTO community_users(username,display_name,email,password_salt,password_hash,role,active,created_at,updated_at) VALUES(?,?,NULL,?,?,?,1,?,?)",(clean_name,nickname,salt,digest,core.ROLE_XIAOFEIXIA,stamp,stamp)); uid=cur.lastrowid
+        except Exception:
+            raise HTTPException(409,"该姓名已注册。")
+        core.mark_invite_used(invite["id"], uid)
+    else:
+        email=email.strip().lower(); name=display_name.strip()
+        if not name: raise HTTPException(400,"请填写昵称。")
+        if not email: raise HTTPException(400,"请填写邮箱。")
+        try:
+            with site.db() as conn:
+                cur=conn.execute("INSERT INTO community_users(username,display_name,email,password_salt,password_hash,role,active,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?)",(email,name,email,salt,digest,core.ROLE_XIAOYOUXIA,stamp,stamp)); uid=cur.lastrowid
+        except Exception:
+            raise HTTPException(409,"这个邮箱已经注册。")
     resp=RedirectResponse('/',303); resp.set_cookie(core.USER_COOKIE,core.make_session(uid),httponly=True,secure=True,samesite="lax",max_age=7*86400); return resp
 
 

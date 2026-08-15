@@ -29,6 +29,7 @@ def admin_nav(active=""):
     <a class="btn {'secondary' if active!='review' else ''}" href="/manage/community/review">投稿审核</a>
     <a class="btn secondary" href="/manage/tools/">工具管理</a>
     <a class="btn {'secondary' if active!='users' else ''}" href="/manage/community/users">用户管理</a>
+    <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
     </div>'''
 
 
@@ -106,6 +107,49 @@ def users_page(request: Request):
     <div class="card"><h2>新增小飞侠</h2><form action="/manage/community/users" method="post"><div class="field"><label>姓名</label><input name="name" required></div><button class="btn">添加</button></form></div></div>
     <div class="card table-wrap"><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>邮箱</th><th>状态</th><th>操作</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="5">暂无用户</td></tr>'}</tbody></table></div></div>'''
     return HTMLResponse(page(body, '用户管理 · 小飞侠设计100%'))
+
+
+@app.get('/invites', response_class=HTMLResponse)
+def invites_page(request: Request):
+    require_admin(request)
+    core.init_db()
+    with site.db() as conn:
+        invites = conn.execute("SELECT * FROM xiaofeixia_invites ORDER BY used ASC, real_name COLLATE NOCASE").fetchall()
+    total = len(invites)
+    unused = sum(1 for i in invites if not i['used'])
+
+    rows = []
+    for inv in invites:
+        status = '<span class="badge ok">已使用</span>' if inv['used'] else '<span class="badge pending">未使用</span>'
+        used_info = site.esc(inv['used_at'][:10]) if inv['used_at'] else '—'
+        rows.append(f'<tr><td><b>{site.esc(inv["real_name"])}</b></td><td><code>{site.esc(inv["code"])}</code></td><td>{status}</td><td>{used_info}</td></tr>')
+
+    body = f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>邀请码管理</h1><div class="muted">小飞侠注册需要邀请码，一人一码，与真实姓名绑定。</div></div>{admin_nav('invites')}</div>
+    <div class="summary"><div class="stat"><b>{total}</b><span>总计</span></div><div class="stat"><b>{unused}</b><span>未使用</span></div></div>
+    <div class="grid"><div class="card"><h2>从 CAD 名单批量生成</h2><p class="muted">为 CAD-100 授权库中所有尚未有邀请码的员工生成邀请码。</p><form action="/manage/community/invites/batch" method="post"><button class="btn">批量生成</button></form></div>
+    <div class="card"><h2>单独生成邀请码</h2><form action="/manage/community/invites" method="post"><div class="field"><label>真实姓名</label><input name="real_name" required></div><button class="btn">生成</button></form></div></div>
+    <div class="card table-wrap"><table class="table"><thead><tr><th>姓名</th><th>邀请码</th><th>状态</th><th>使用日期</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="4">暂无邀请码，请先生成。</td></tr>'}</tbody></table></div></div>'''
+    return HTMLResponse(page(body, '邀请码管理 · 小飞侠设计100%'))
+
+
+@app.post('/invites')
+def create_invite(request: Request, real_name: str = Form(...)):
+    require_admin(request)
+    try:
+        core.create_invite(real_name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return RedirectResponse('/manage/community/invites', 303)
+
+
+@app.post('/invites/batch')
+def batch_invites(request: Request):
+    require_admin(request)
+    try:
+        core.batch_create_invites()
+    except FileNotFoundError:
+        raise HTTPException(404, "没有找到 CAD-100 用户数据库，请检查 CAD100_LICENSE_DB 配置。")
+    return RedirectResponse('/manage/community/invites', 303)
 
 
 @app.post('/import-cad-users')
