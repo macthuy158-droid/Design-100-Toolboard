@@ -9,10 +9,13 @@
 它负责：
 
 - 使用 `app_v2.py` 的公共首页 UI
+- 安装 SQLite 运行时保护
+- 初始化数据库结构与迁移
 - 挂载 `/account`
 - 挂载 `/developer`
 - 挂载 `/manage`
 - 在挂载新管理员后台前移除 `app_v2.py` 遗留的旧 `/manage*` 路由
+- 将开发者 POST 投稿接口替换为流式上传实现
 
 不要在其他文件再次创建第二套总入口。
 
@@ -26,6 +29,7 @@
 - 公共 CSS / JS
 - 基础工具数据访问函数
 - 基础页面渲染
+- 一部分历史公共实现，线上会由 `app.py` 组装时替换或屏蔽
 
 规则：
 
@@ -33,7 +37,7 @@
 - 不在此文件新增小飞侠 / 小游侠身份逻辑。
 - 修改首页 UI 时单独提交，不和后台功能修改混在一个 commit。
 
-## 3. 会员与开发者
+## 3. 会员与核心业务
 
 `community_core.py`
 
@@ -53,13 +57,37 @@
 
 - 登录 / 注册 / 退出
 - 个人中心
-- 小飞侠开发者中心
-- 新工具与新版本投稿
+- 小飞侠开发者页面
 - 产品详情中的购买、评价和下载门禁
+- 投稿表单 UI
 
-原则：版本更新必须同时满足前端只显示 owner 工具、接口校验 owner、数据库审核约束三层保护。
+版本更新必须同时满足：前端只显示 owner 工具、POST 接口再次校验 owner、数据库审核约束三层保护。
 
-## 4. 管理后台
+## 4. 开发者安装包上传
+
+`developer_upload.py`
+
+负责：
+
+- POST `/developer/submit`
+- 登录和小飞侠身份检查
+- 原开发者 owner 检查
+- 新工具 / 新版本参数校验
+- 保存成功后写入 `tool_submissions`
+
+`upload_storage.py`
+
+负责：
+
+- 4MB 分块读取上传文件
+- 直接写入磁盘，不把几百 MB 安装包整体读入内存
+- 写入过程中同步计算 SHA256
+- 限制最大安装包大小
+- 空文件、超限、异常时删除 `.part` / 残留文件
+
+上传文件期间不保持 SQLite 写事务。
+
+## 5. 管理后台
 
 `admin_portal.py`
 
@@ -82,9 +110,20 @@
 
 管理员不直接上传新工具或新版本。
 
-## 5. 数据与文件
+## 6. 数据库运行保护
 
-当前使用 SQLite。
+`runtime_support.py`
+
+负责：
+
+- SQLite `foreign_keys = ON`
+- SQLite `busy_timeout`
+- 异常自动 rollback
+- `community_core.init_db()` 每个进程只实际执行一次
+
+当前仍使用 SQLite；未来只有在并发量明显增加后再评估 PostgreSQL，不需要提前复杂化。
+
+## 7. 数据与文件
 
 运行数据位于 `TOOLBOARD_DATA_DIR`，默认包括：
 
@@ -94,26 +133,42 @@
 
 这些目录不得提交到 Git。
 
-后续数据库迁移应逐步从请求路径中移出，最终仅在应用启动或独立 migration 命令中执行。
+## 8. 自动检查
 
-大安装包上传后续统一改为流式写盘，不允许把几百 MB 文件整体读入内存。
+GitHub Actions 会自动执行：
 
-## 6. 修改原则
+- Python 编译检查
+- 路由结构检查
+- 管理后台旧路由泄漏检查
+- 开发者流式投稿接口检查
+- 小飞侠免费下载规则
+- 小游侠必须拥有非零 paid entitlement 才能下载
+- 原开发者 owner 权限检查
+- 流式上传文件一致性 / SHA256 / 超限清理检查
+
+对应脚本：
+
+- `scripts/check_structure.py`
+- `scripts/check_business_rules.py`
+- `scripts/check_upload_storage.py`
+
+## 9. 修改原则
 
 每次上线尽量保持一种类型的改动：
 
 - UI commit
 - 权限 / 业务 commit
 - 数据迁移 commit
+- 存储 / 上传 commit
 - 部署 commit
 
 不要再为了一个后台字段整体替换公共首页文件。
 
-发布前必须运行：
+发布前至少运行：
 
 ```bash
-python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py main.py
+python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py runtime_support.py upload_storage.py developer_upload.py main.py
 python scripts/check_structure.py
+python scripts/check_business_rules.py
+python scripts/check_upload_storage.py
 ```
-
-其中结构检查确保旧管理员路由不能重新进入线上应用。
