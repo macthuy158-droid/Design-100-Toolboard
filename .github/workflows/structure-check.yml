@@ -16,9 +16,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile Python files
-        run: python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py main.py
+        run: python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py runtime_support.py main.py scripts/check_structure.py
       - name: Check route structure
         env:
+          TOOLBOARD_ADMIN_USERNAME: admin
           TOOLBOARD_ADMIN_PASSWORD: test-admin-password
           TOOLBOARD_SESSION_SECRET: test-session-secret
           TOOLBOARD_DATA_DIR: /tmp/design100-ci-data
