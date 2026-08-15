@@ -39,7 +39,7 @@ def install_streaming_submit(router):
         slug: str = Form(""),
         tagline: str = Form(""),
         description: str = Form(""),
-        category: str = Form("效率工具"),
+        category: str = Form(core.DEFAULT_TOOL_CATEGORY),
         platform: str = Form("Windows"),
         icon_text: str = Form("100"),
         price_yuan: float = Form(...),
@@ -82,6 +82,8 @@ def install_streaming_submit(router):
             slug = slug.strip().lower()
             if not core.VALID_SLUG.match(slug):
                 raise HTTPException(status_code=400, detail="Slug 只能使用小写英文、数字和短横线。")
+            if category not in core.TOOL_CATEGORIES:
+                raise HTTPException(status_code=400, detail="请选择有效的工具分类。")
         else:
             raise HTTPException(status_code=400, detail="投稿类型无效。")
 

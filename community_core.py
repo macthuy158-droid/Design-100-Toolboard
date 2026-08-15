@@ -20,6 +20,8 @@ CAD_LICENSE_DB = Path(os.getenv("CAD100_LICENSE_DB", "/opt/cad100-license/data/l
 SUBMISSION_DIR = site.DATA_DIR / "submissions"
 MAX_UPLOAD_BYTES = int(os.getenv("TOOLBOARD_MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
 VALID_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,79}$")
+TOOL_CATEGORIES = ["CAD", "Rhino", "SketchUp", "Revit", "UE", "Figma", "Word", "其他"]
+DEFAULT_TOOL_CATEGORY = "其他"
 
 
 def now():
