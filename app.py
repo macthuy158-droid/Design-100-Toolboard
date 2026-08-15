@@ -9,10 +9,24 @@ never shadow or bypass the current admin authentication flow.
 from fastapi import Request
 
 import app_v2 as public_site
-import admin_portal
-import community_admin
-import community_core
-import community_portal
+from runtime_support import install_database_connection, once_per_process
+
+# Install the safer SQLite connection before feature modules import `db` from
+# app_v2. This keeps the public UI untouched while giving every module foreign
+# key enforcement, lock waiting and rollback-on-error behavior.
+install_database_connection(public_site)
+
+import admin_portal  # noqa: E402
+import community_core  # noqa: E402
+import community_portal  # noqa: E402
+
+# Schema creation/migrations are bootstrap work, not request work. Existing
+# request handlers may still call core.init_db(); the wrapper makes those calls
+# cheap no-ops after the first successful initialization in each process.
+community_core.init_db = once_per_process(community_core.init_db)
+community_core.init_db()
+
+import community_admin  # noqa: E402
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
@@ -116,8 +130,6 @@ def _remove_legacy_admin_routes():
 
 
 _remove_legacy_admin_routes()
-
-community_core.init_db()
 community_portal.install_public_routes(app)
 
 
