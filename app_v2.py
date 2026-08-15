@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 APP_ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("TOOLBOARD_DATA_DIR", str(APP_ROOT / "data")))
@@ -257,89 +257,3 @@ def home():
 <main class="grid">{''.join(cards)}<div id="empty-state" class="empty">没有找到匹配的工具。</div></main></section>
 <footer id="about" class="footer"><span><strong>深圳院设计100%</strong> · 工具开发板</span><span>面向真实设计生产流程持续迭代 · Internal Design Tools</span></footer></div>'''
     return HTMLResponse(page(body, extra=JS), headers={"Cache-Control": "no-cache"})
-
-
-@app.get("/tools/{slug}", response_class=HTMLResponse)
-def detail(slug: str):
-    with db() as conn:
-        t = conn.execute("SELECT * FROM tools WHERE slug=? AND active=1", (slug,)).fetchone()
-        if not t: raise HTTPException(status_code=404, detail="工具不存在。")
-        rel = latest_release(conn, t["id"])
-    version = rel["version"] if rel else "待发布"
-    notes = rel["notes"] if rel else "暂无版本说明。"
-    size = format_bytes(rel["size"]) if rel else "—"
-    published = rel["published_at"][:10] if rel and rel["published_at"] else "—"
-    download = f'<a class="btn" href="/tools/{esc(slug)}/download">下载 Windows 版 · v{esc(version)}</a>' if rel else '<span class="btn" style="background:#b4b4b0">安装包待发布</span>'
-    shots=[]
-    for raw in (t["screenshots"] or "").replace(",", "\n").splitlines():
-        url=raw.strip()
-        if url.startswith("https://") or url.startswith("http://"): shots.append(f'<img src="{esc(url)}" alt="{esc(t["name"])} 软件截图" loading="lazy">')
-    screenshots=f'<div class="screenshots">{"".join(shots)}</div>' if shots else ""
-    body = nav() + f'''<div class="shell"><section class="detail-hero"><a class="back" href="/">← 返回工具开发板</a><div class="product"><div>
-<div class="eyebrow">{esc(t['category'])} · {esc(t['platform'])}</div><h1>{esc(t['name'])}</h1><div class="lead">{esc(t['tagline'])}</div>
-<div class="facts"><div class="fact"><b>v{esc(version)}</b><span>当前版本</span></div><div class="fact"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="fact"><b>{esc(t['platform'])}</b><span>运行平台</span></div></div><div class="actions">{download}</div></div>
-<div class="product-icon">{esc(t['icon_text'])}</div></div></section><section class="detail-grid"><div class="panel"><h2>工具介绍</h2><p>{esc(t['description'])}</p>{screenshots}</div>
-<div class="panel"><h2>当前版本</h2><p><b>v{esc(version)}</b>\n\n{esc(notes)}</p><div class="release-meta"><div class="meta-item"><b>{esc(published)}</b><span>发布日期</span></div><div class="meta-item"><b>{esc(size)}</b><span>安装包大小</span></div></div></div></section>
-<footer class="footer"><span><strong>深圳院设计100%</strong> · 工具开发板</span><span>{esc(t['name'])}</span></footer></div>'''
-    return HTMLResponse(page(body, f"{t['name']} · 深圳院设计100%"))
-
-
-@app.get("/tools/{slug}/download")
-def download(slug: str):
-    with db() as conn:
-        t=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
-        if not t: raise HTTPException(status_code=404,detail="工具不存在。")
-        rel=latest_release(conn,t["id"])
-        if not rel: raise HTTPException(status_code=404,detail="安装包尚未发布。")
-        path=Path(rel["package_path"])
-        if not path.exists(): raise HTTPException(status_code=404,detail="安装包文件不存在。")
-        conn.execute("UPDATE tools SET downloads=downloads+1,updated_at=? WHERE id=?",(now_text(),t["id"]))
-    return FileResponse(path=str(path),filename=rel["package_name"],media_type="application/octet-stream")
-
-
-@app.get("/manage", response_class=HTMLResponse)
-def manage(request: Request):
-    if not valid_session(request):
-        body='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>工具开发板管理</h1><form id="f"><div class="field"><label>管理密码</label><input id="p" type="password" autofocus></div><button class="btn" type="submit">进入后台</button><div id="m" class="msg"></div></form></div></div><script>document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/manage/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('p').value})});const j=await r.json().catch(()=>({}));if(r.ok)location.href='/manage';else document.getElementById('m').textContent=j.detail||'登录失败';});</script>'''
-        return HTMLResponse(page(body,"工具开发板管理"))
-    with db() as conn:
-        tools=conn.execute("SELECT * FROM tools ORDER BY downloads DESC,id DESC").fetchall()
-        rows=''.join([f"<tr><td>{esc(t['name'])}</td><td>{esc(t['slug'])}</td><td>{esc(t['category'])}</td><td>{int(t['downloads']):,}</td><td><a href='/tools/{esc(t['slug'])}'>查看</a></td></tr>" for t in tools])
-    body=f'''<div class="admin"><div class="adminhead"><div><div class="eyebrow">DESIGN 100</div><h1 style="margin:6px 0 0">工具开发板管理</h1></div><button class="btn secondary" onclick="fetch('/manage/logout',{{method:'POST'}}).then(()=>location.href='/manage')">退出</button></div>
-<div class="cards"><div class="card"><h2>新增工具</h2><form action="/manage/tools" method="post"><div class="field"><label>工具名称</label><input name="name" required></div><div class="field"><label>URL 标识</label><input name="slug" placeholder="例如 pdf-tool" required></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><input name="category" value="效率工具"></div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><button class="btn">新增工具</button></form></div>
-<div class="card"><h2>发布版本</h2><form action="/manage/releases" method="post" enctype="multipart/form-data"><div class="field"><label>工具 slug</label><input name="slug" placeholder="cad-100" required></div><div class="field"><label>版本号</label><input name="version" placeholder="2.1.0" required></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包</label><input name="package" type="file" required></div><button class="btn">发布版本</button></form></div></div>
-<div class="card" style="margin-top:16px"><h2>已发布工具</h2><table class="table"><thead><tr><th>名称</th><th>Slug</th><th>分类</th><th>下载量</th><th></th></tr></thead><tbody>{rows}</tbody></table></div></div>'''
-    return HTMLResponse(page(body,"工具开发板管理"))
-
-
-@app.post("/manage/login")
-async def manage_login(request: Request):
-    if not ADMIN_PASSWORD: raise HTTPException(status_code=503,detail="后台密码未配置。")
-    data=await request.json()
-    if not hmac.compare_digest(str(data.get("password","")),ADMIN_PASSWORD): raise HTTPException(status_code=401,detail="密码不正确。")
-    resp=JSONResponse({"success":True}); resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite="strict",max_age=8*3600); return resp
-
-
-@app.post("/manage/logout")
-def manage_logout():
-    resp=JSONResponse({"success":True}); resp.delete_cookie(COOKIE_NAME); return resp
-
-
-@app.post("/manage/tools")
-def create_tool(request: Request,name: str=Form(...),slug: str=Form(...),tagline: str=Form(""),description: str=Form(""),category: str=Form("效率工具"),platform: str=Form("Windows"),icon_text: str=Form("100")):
-    require_admin(request); now=now_text()
-    try:
-        with db() as conn: conn.execute('''INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)''',(slug.strip(),name.strip(),tagline.strip(),description.strip(),category.strip(),platform.strip(),icon_text.strip(),now,now))
-    except sqlite3.IntegrityError: raise HTTPException(status_code=409,detail="slug 已存在。")
-    return RedirectResponse('/manage',status_code=303)
-
-
-@app.post("/manage/releases")
-async def create_release(request: Request,slug: str=Form(...),version: str=Form(...),notes: str=Form(""),package: UploadFile=File(...)):
-    require_admin(request); content=await package.read()
-    if not content: raise HTTPException(status_code=400,detail="安装包不能为空。")
-    with db() as conn:
-        t=conn.execute("SELECT * FROM tools WHERE slug=?",(slug.strip(),)).fetchone()
-        if not t: raise HTTPException(status_code=404,detail="工具不存在。")
-        safe_name=(package.filename or f"{slug}-{version}.zip").replace('/','_').replace('\\','_'); tool_dir=PACKAGE_DIR / slug.strip(); tool_dir.mkdir(parents=True,exist_ok=True); path=tool_dir / safe_name; path.write_bytes(content); digest=hashlib.sha256(content).hexdigest(); conn.execute("UPDATE releases SET active=0 WHERE tool_id=?",(t['id'],)); conn.execute('''INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)''',(t['id'],version.strip(),notes.strip(),safe_name,str(path),digest,len(content),now_text()))
-    return RedirectResponse('/manage',status_code=303)
