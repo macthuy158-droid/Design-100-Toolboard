@@ -4,8 +4,8 @@ Run with:
     python scripts/check_structure.py
 
 The check intentionally uses only the standard library plus the project's
-runtime dependencies. It catches the route collisions that previously allowed
-legacy password-only admin endpoints to shadow the current admin app.
+runtime dependencies. It catches route collisions and verifies that sensitive
+routes are owned by the intended modules.
 """
 
 from collections import Counter
@@ -39,7 +39,6 @@ legacy_admin_routes = [
     if path == "/manage" or path.startswith("/manage/")
 ]
 
-# The current admin system must appear only as one mounted application.
 manage_mounts = [
     route
     for route in app.router.routes
@@ -48,7 +47,6 @@ manage_mounts = [
 if len(manage_mounts) != 1:
     raise SystemExit(f"Expected exactly one /manage mount, found {len(manage_mounts)}")
 
-# No legacy concrete /manage/login route is allowed on the public app.
 for path, methods in legacy_admin_routes:
     if path != "/manage":
         raise SystemExit(
@@ -61,6 +59,21 @@ missing = sorted(required_paths - actual_paths)
 if missing:
     raise SystemExit(f"Required routes missing: {', '.join(missing)}")
 
+submit_posts = [
+    route
+    for route in app.router.routes
+    if getattr(route, "path", "") == "/developer/submit"
+    and "POST" in (getattr(route, "methods", set()) or set())
+]
+if len(submit_posts) != 1:
+    raise SystemExit(f"Expected exactly one POST /developer/submit, found {len(submit_posts)}")
+submit_module = getattr(getattr(submit_posts[0], "endpoint", None), "__module__", "")
+if submit_module != "developer_upload":
+    raise SystemExit(
+        f"POST /developer/submit must use streaming developer_upload endpoint, got {submit_module!r}"
+    )
+
 print("Structure check passed")
 print(f"Top-level routes: {len(routes)}")
 print("Admin mount: /manage")
+print("Developer upload: streaming endpoint")
