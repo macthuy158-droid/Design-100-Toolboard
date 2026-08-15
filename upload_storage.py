@@ -13,6 +13,7 @@ from fastapi import UploadFile
 
 
 UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".zip"}
 
 
 class SavedUpload(NamedTuple):
@@ -24,7 +25,14 @@ class SavedUpload(NamedTuple):
 
 def safe_package_name(filename: str, fallback: str) -> str:
     name = (filename or fallback).replace("/", "_").replace("\\", "_").strip()
+    name = name.lstrip(".")
     return name or fallback
+
+
+def check_extension(name: str) -> None:
+    suffix = Path(name).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError("安装包必须是 .zip 压缩包。请把工具打包成 zip 后再上传。")
 
 
 async def save_upload_stream(
@@ -46,6 +54,7 @@ async def save_upload_stream(
 
     directory.mkdir(parents=True, exist_ok=True)
     package_name = safe_package_name(upload.filename or "", fallback_name)
+    check_extension(package_name)
     token = secrets.token_hex(6)
     final_path = directory / f"{token}-{package_name}"
     part_path = directory / f".{token}-{package_name}.part"

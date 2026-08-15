@@ -52,10 +52,28 @@ async def run_checks():
             raise AssertionError("oversized upload was accepted")
 
         assert not list(root.iterdir()), "failed upload left residual files"
+
+        wrong_type = UploadFile(filename="tool.exe", file=io.BytesIO(b"not a zip"))
+        try:
+            await save_upload_stream(
+                wrong_type,
+                root,
+                fallback_name="fallback.zip",
+                max_bytes=4096,
+                chunk_bytes=1024,
+            )
+        except ValueError as exc:
+            assert ".zip" in str(exc)
+        else:
+            raise AssertionError("non-zip upload was accepted")
+
+        assert not list(root.iterdir()), "rejected non-zip upload left residual files"
+
         print("Streaming upload checks passed")
         print("- chunked persistence")
         print("- SHA256 while streaming")
         print("- oversize cleanup")
+        print("- non-zip rejection")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
