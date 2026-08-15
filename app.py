@@ -1,4 +1,10 @@
-"""Canonical application entrypoint for 小飞侠设计100%."""
+"""Canonical application composition root for 小飞侠设计100%.
+
+This file only assembles the public site, member/developer features and the
+current admin application. Legacy routes that still physically exist inside
+app_v2.py are removed here before the real admin app is mounted, so they can
+never shadow or bypass the current admin authentication flow.
+"""
 
 from fastapi import Request
 
@@ -11,6 +17,7 @@ import community_portal
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
 HERO_TITLE = "Desgin 100%"
+LEGACY_ADMIN_PREFIX = "/manage"
 
 SESSION_UI = r'''
 <script>
@@ -89,6 +96,26 @@ public_site.nav = branded_nav
 public_site.page = branded_page
 public_site.app.title = SITE_TITLE
 app = public_site.app
+
+
+def _remove_legacy_admin_routes():
+    """Disable the old password-only admin endpoints still present in app_v2.
+
+    The current admin application is mounted below after these routes are
+    removed. This prevents duplicate /manage routes and ensures the username +
+    password admin authentication in admin_portal is the only active path.
+    """
+    app.router.routes[:] = [
+        route
+        for route in app.router.routes
+        if not (
+            (path := getattr(route, "path", "")) == LEGACY_ADMIN_PREFIX
+            or path.startswith(LEGACY_ADMIN_PREFIX + "/")
+        )
+    ]
+
+
+_remove_legacy_admin_routes()
 
 community_core.init_db()
 community_portal.install_public_routes(app)
