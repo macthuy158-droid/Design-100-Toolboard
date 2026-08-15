@@ -20,6 +20,7 @@
 - 管理后台：投稿审核 / 工具管理 / 用户管理
 - CAD-100 院内人员导入
 - 下载权限与下载日志
+- 开发者安装包流式写盘：4MB 分块读取、边写边计算 SHA256、超限/失败自动清理残留文件
 
 > 微信 / 支付宝真实在线支付尚未接入。当前代码不会伪造支付成功。
 
@@ -49,12 +50,17 @@ CAD100_LICENSE_DB=/opt/cad100-license/data/license.db
 
 - `app.py`：**唯一应用组装入口**；挂载公共站、账号、开发者和管理员模块，并屏蔽历史旧后台路由。
 - `app_v2.py`：公共首页 UI 与早期公共基础代码。**不要在这里新增管理员业务。**
+- `runtime_support.py`：SQLite 外键、锁等待、异常回滚，以及数据库初始化只执行一次的运行时保护。
 - `community_core.py`：用户、角色、订单、授权、评价、投稿、owner 等核心数据和权限逻辑。
-- `community_portal.py`：登录注册、个人中心、开发者投稿、产品详情、付费/下载门禁。
+- `community_portal.py`：登录注册、个人中心、开发者页面、产品详情、付费/下载门禁。
+- `developer_upload.py`：小飞侠投稿 POST 接口与 owner 校验。
+- `upload_storage.py`：安装包流式写盘、大小限制、SHA256 和失败清理。
 - `admin_portal.py`：管理员登录、后台首页、工具基础管理。
 - `community_admin.py`：投稿审核、用户管理。
-- `scripts/check_structure.py`：检查重复路由和旧后台泄漏。
-- `.github/workflows/structure-check.yml`：GitHub 自动编译与结构检查。
+- `scripts/check_structure.py`：检查重复路由、旧后台泄漏、流式投稿接口是否生效。
+- `scripts/check_business_rules.py`：检查小飞侠免费下载、小游侠付费门禁、owner 权限。
+- `scripts/check_upload_storage.py`：检查流式保存、SHA256、超限清理。
+- `.github/workflows/structure-check.yml`：GitHub 自动编译和上述检查。
 
 更详细的边界见 `ARCHITECTURE.md`。
 
@@ -73,11 +79,13 @@ uvicorn app:app --host 127.0.0.1 --port 8100
 ## 发布前检查
 
 ```bash
-python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py main.py
+python -m py_compile app.py app_v2.py admin_portal.py community_core.py community_portal.py community_admin.py runtime_support.py upload_storage.py developer_upload.py main.py
 python scripts/check_structure.py
+python scripts/check_business_rules.py
+python scripts/check_upload_storage.py
 ```
 
-GitHub Actions 会在 push / pull request 时自动执行同样的基础检查。
+GitHub Actions 会在 push / pull request 时自动执行这些检查。
 
 ## 部署
 
