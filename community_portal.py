@@ -195,26 +195,26 @@ def submit_page(request: Request, tool: str = ""):
     category_opts=''.join(f'<option value="{site.esc(c)}">{site.esc(c)}</option>' for c in core.TOOL_CATEGORIES)
     body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">新工具可自行提交；已有工具的新版本只允许原开发者提交。价格为产品当前同行售价，审核通过后同步更新。</div>
     <form action="/developer/submit" method="post" enctype="multipart/form-data"><div class="field"><label>投稿类型</label><select name="submission_type"><option value="new_tool" {"selected" if default_type=="new_tool" else ""}>新工具</option><option value="new_release" {"selected" if default_type=="new_release" else ""}>已有工具新版本</option></select></div>
-    <div class="field"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>Slug</label><input name="slug" placeholder="例如 text-100"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><select name="category">{category_opts}</select></div></div><div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>同行价格（元）</label><input name="price_yuan" type="number" min="0.01" step="0.01" required></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
+    <div class="field"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><select name="category">{category_opts}</select></div></div><div><div class="field"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field"><label>同行价格（元）</label><input name="price_yuan" type="number" min="0.01" step="0.01" required></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
     <div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field"><label>安装包（仅支持 .zip）</label><input name="package" type="file" accept=".zip" required></div><button class="btn">提交审核</button></form></div></div>'''
     return HTMLResponse(page(body,"开发者投稿 · 小飞侠设计100%"))
 
 
 @developer_router.post("/submit")
-async def submit(request: Request, submission_type: str=Form(...), existing_slug: str=Form(""), name: str=Form(""), slug: str=Form(""), tagline: str=Form(""), description: str=Form(""), category: str=Form("效率工具"), platform: str=Form("Windows"), icon_text: str=Form("100"), price_yuan: float=Form(...), version: str=Form(...), notes: str=Form(""), package: UploadFile=File(...)):
+async def submit(request: Request, submission_type: str=Form(...), existing_slug: str=Form(""), name: str=Form(""), tagline: str=Form(""), description: str=Form(""), category: str=Form("效率工具"), platform: str=Form("Windows"), icon_text: str=Form("100"), price_yuan: float=Form(...), version: str=Form(...), notes: str=Form(""), package: UploadFile=File(...)):
     core.init_db(); user=developer_required(request); content=await package.read()
     if not content or len(content)>core.MAX_UPLOAD_BYTES: raise HTTPException(400,"安装包为空或超过大小限制。")
     if price_yuan<=0: raise HTTPException(400,"同行价格必须大于 0 元。")
     with site.db() as conn:
-        tool=None
+        tool=None; slug=""
         if submission_type=='new_release':
             tool=conn.execute("SELECT * FROM tools WHERE slug=?",(existing_slug.strip(),)).fetchone()
             if not tool: raise HTTPException(404,"已有工具不存在。")
             if not core.is_tool_owner(tool,user): raise HTTPException(403,"只有该工具原开发者可以提交新版本。")
             name=tool['name']; slug=tool['slug']; tagline=tool['tagline']; description=tool['description']; category=tool['category']; platform=tool['platform']; icon_text=tool['icon_text']
         elif submission_type=='new_tool':
-            slug=slug.strip().lower()
-            if not core.VALID_SLUG.match(slug): raise HTTPException(400,"Slug 只能使用小写英文、数字和短横线。")
+            if not name.strip(): raise HTTPException(400,"工具名称不能为空。")
+            slug=core.slug_from_name(name)
         else:
             raise HTTPException(400,"投稿类型无效。")
         safe=(package.filename or f'{slug}-{version}.zip').replace('/','_').replace('\\','_'); folder=core.SUBMISSION_DIR/str(user['id']); folder.mkdir(parents=True,exist_ok=True); path=folder/f'{secrets.token_hex(4)}-{safe}'; path.write_bytes(content); digest=hashlib.sha256(content).hexdigest()

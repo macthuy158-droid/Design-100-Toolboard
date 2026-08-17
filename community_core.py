@@ -24,6 +24,24 @@ TOOL_CATEGORIES = ["CAD", "Rhino", "SketchUp", "Revit", "UE", "Figma", "Word", "
 DEFAULT_TOOL_CATEGORY = "其他"
 
 
+def slug_from_name(name: str) -> str:
+    from pypinyin import pinyin, Style
+    raw = name.strip().lower()
+    parts = []
+    for ch in raw:
+        if re.match(r"[a-z0-9]", ch):
+            parts.append(ch)
+        elif re.match(r"[\s_\-]", ch):
+            parts.append("-")
+        elif "一" <= ch <= "鿿":
+            py = pinyin(ch, style=Style.NORMAL)
+            parts.append(py[0][0] if py else "")
+        else:
+            parts.append("-")
+    slug = re.sub(r"-+", "-", "".join(parts)).strip("-")
+    return slug[:80] if slug else "tool"
+
+
 def now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -245,15 +263,17 @@ def can_download(conn, user, tool):
     ).fetchone())
 
 
-def generate_invite_code():
-    return secrets.token_hex(4).upper()
+def generate_invite_code(real_name: str):
+    from pypinyin import pinyin, Style
+    py = "".join(s[0] for s in pinyin(real_name, style=Style.NORMAL))
+    return py + "cswadi"
 
 
 def create_invite(real_name: str):
     clean = " ".join(real_name.strip().split())
     if not clean:
         raise ValueError("姓名不能为空。")
-    code = generate_invite_code()
+    code = generate_invite_code(clean)
     stamp = now()
     with site.db() as conn:
         existing = conn.execute(

@@ -36,7 +36,6 @@ def install_streaming_submit(router):
         submission_type: str = Form(...),
         existing_slug: str = Form(""),
         name: str = Form(""),
-        slug: str = Form(""),
         tagline: str = Form(""),
         description: str = Form(""),
         category: str = Form(core.DEFAULT_TOOL_CATEGORY),
@@ -79,9 +78,9 @@ def install_streaming_submit(router):
             platform = tool["platform"]
             icon_text = tool["icon_text"]
         elif submission_type == "new_tool":
-            slug = slug.strip().lower()
-            if not core.VALID_SLUG.match(slug):
-                raise HTTPException(status_code=400, detail="Slug 只能使用小写英文、数字和短横线。")
+            if not name.strip():
+                raise HTTPException(status_code=400, detail="工具名称不能为空。")
+            slug = core.slug_from_name(name)
             if category not in core.TOOL_CATEGORIES:
                 raise HTTPException(status_code=400, detail="请选择有效的工具分类。")
         else:
