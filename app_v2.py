@@ -238,14 +238,19 @@ def home():
                 categories.append(c)
         cards = []
         for i, t in enumerate(tools, 1):
+            tool_type = t["tool_type"] if "tool_type" in t.keys() else "desktop"
+            is_web = tool_type == "web_app"
             rel = latest_release(conn, t["id"])
             version = rel["version"] if rel else "待发布"
-            search_text = f"{t['name']} {t['tagline']} {t['category']} {t['platform']}".lower()
+            platform_label = "Web" if is_web else t["platform"]
+            search_text = f"{t['name']} {t['tagline']} {t['category']} {platform_label}".lower()
+            rank_label = "CLOUD APP" if is_web else "DOWNLOAD RANK"
+            foot = '<div class="downloads"><b>Cloud</b><span>立即使用</span></div>' if is_web else f'<div class="downloads"><b>{int(t["downloads"]):,}</b><span>累计下载</span></div>'
             cards.append(f'''<a class="tool" href="/tools/{esc(t['slug'])}" data-category="{esc(t['category'])}" data-search="{esc(search_text)}">
-<div class="rank"><span>DOWNLOAD RANK</span><span class="rank-num">#{i:02d}</span></div>
+<div class="rank"><span>{rank_label}</span><span class="rank-num">#{i:02d}</span></div>
 <div class="icon">{esc(t['icon_text'])}</div><h3>{esc(t['name'])}</h3><div class="tagline">{esc(t['tagline'])}</div>
-<div class="chips"><span class="chip">{esc(t['category'])}</span><span class="chip">{esc(t['platform'])}</span><span class="chip">v{esc(version)}</span></div>
-<div class="footrow"><div class="downloads"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="arrow">↗</div></div></a>''')
+<div class="chips"><span class="chip">{esc(t['category'])}</span><span class="chip">{esc(platform_label)}</span><span class="chip">v{esc(version)}</span></div>
+<div class="footrow">{foot}<div class="arrow">↗</div></div></a>''')
     filters = ['<button class="filter active" data-category="all">全部</button>']
     filters += [f'<button class="filter" data-category="{esc(c)}">{esc(c)}</button>' for c in categories]
     body = nav() + f'''<div class="shell"><section class="hero"><div class="hero-card">

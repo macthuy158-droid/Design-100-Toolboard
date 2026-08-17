@@ -20,7 +20,7 @@ CAD_LICENSE_DB = Path(os.getenv("CAD100_LICENSE_DB", "/opt/cad100-license/data/l
 SUBMISSION_DIR = site.DATA_DIR / "submissions"
 MAX_UPLOAD_BYTES = int(os.getenv("TOOLBOARD_MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
 VALID_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,79}$")
-TOOL_CATEGORIES = ["CAD", "Rhino", "SketchUp", "Revit", "UE", "Figma", "Word", "其他"]
+TOOL_CATEGORIES = ["CAD", "Rhino", "SketchUp", "Revit", "UE", "Figma", "Word", "GIS", "其他"]
 DEFAULT_TOOL_CATEGORY = "其他"
 
 
@@ -214,6 +214,10 @@ def init_db():
             conn.execute("ALTER TABLE tools ADD COLUMN price_cents INTEGER NOT NULL DEFAULT 0")
         if 'developer_name' not in cols:
             conn.execute("ALTER TABLE tools ADD COLUMN developer_name TEXT NOT NULL DEFAULT ''")
+        if 'tool_type' not in cols:
+            conn.execute("ALTER TABLE tools ADD COLUMN tool_type TEXT NOT NULL DEFAULT 'desktop'")
+        if 'app_url' not in cols:
+            conn.execute("ALTER TABLE tools ADD COLUMN app_url TEXT NOT NULL DEFAULT ''")
         _migrate_legacy_slugs(conn)
         _backfill_legacy_tool_owners(conn)
         _install_submission_guards(conn)
