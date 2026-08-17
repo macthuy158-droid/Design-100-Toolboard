@@ -22,6 +22,7 @@ community_core.init_db()
 
 import bounty_portal  # noqa: E402
 import community_admin  # noqa: E402
+import homepage_portal  # noqa: E402
 
 # Bounty schema is deliberately isolated from the existing tool/community
 # migrations so the new feature can evolve without destabilising Tool Store.
@@ -111,6 +112,7 @@ app = public_site.app
 
 community_portal.install_public_routes(app)
 developer_upload.install_streaming_submit(community_portal.developer_router)
+homepage_portal.install_homepage(app, public_site)
 
 
 @app.get("/account/session")
