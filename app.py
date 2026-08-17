@@ -10,9 +10,6 @@ from fastapi import Request
 import app_v2 as public_site
 from runtime_support import install_database_connection, once_per_process
 
-# Install the safer SQLite connection before feature modules import `db` from
-# app_v2. This keeps the public UI untouched while giving every module foreign
-# key enforcement, lock waiting and rollback-on-error behavior.
 install_database_connection(public_site)
 
 import admin_portal  # noqa: E402
@@ -20,13 +17,15 @@ import community_core  # noqa: E402
 import community_portal  # noqa: E402
 import developer_upload  # noqa: E402
 
-# Schema creation/migrations are bootstrap work, not request work. Existing
-# request handlers may still call core.init_db(); the wrapper makes those calls
-# cheap no-ops after the first successful initialization in each process.
 community_core.init_db = once_per_process(community_core.init_db)
 community_core.init_db()
 
+import bounty_portal  # noqa: E402
 import community_admin  # noqa: E402
+
+# Bounty schema is deliberately isolated from the existing tool/community
+# migrations so the new feature can evolve without destabilising Tool Store.
+bounty_portal.init_db()
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
@@ -87,7 +86,7 @@ _original_nav = public_site.nav
 def branded_nav():
     html = brand_text(_original_nav())
     old = '<div class="navlinks"><a href="/#tools">工具</a><a href="/#about">关于</a><a class="admin-link" href="/manage">管理</a></div>'
-    new = '''<div class="navlinks"><a href="/#tools">工具</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
+    new = '''<div class="navlinks"><a href="/#tools">工具</a><a href="/bounties">需求</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
     return html.replace(old, new)
 
 
@@ -110,8 +109,6 @@ public_site.page = branded_page
 public_site.app.title = SITE_TITLE
 app = public_site.app
 
-# Product detail/download ownership belongs to the community module. The base
-# site now owns only the homepage, so there are no legacy admin routes to strip.
 community_portal.install_public_routes(app)
 developer_upload.install_streaming_submit(community_portal.developer_router)
 
@@ -131,6 +128,7 @@ def account_session(request: Request):
 
 app.include_router(community_portal.router, prefix="/account")
 app.include_router(community_portal.developer_router, prefix="/developer")
+app.include_router(bounty_portal.router)
 
 _original_admin_page = admin_portal.admin_page
 
