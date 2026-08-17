@@ -22,11 +22,15 @@ community_core.init_db()
 
 import bounty_portal  # noqa: E402
 import community_admin  # noqa: E402
+import course_portal  # noqa: E402
 import homepage_portal  # noqa: E402
+import toolboard_portal  # noqa: E402
 
-# Bounty schema is deliberately isolated from the existing tool/community
-# migrations so the new feature can evolve without destabilising Tool Store.
+# Bounty and course schemas are deliberately isolated from the existing
+# tool/community migrations so the new features can evolve without
+# destabilising Tool Store.
 bounty_portal.init_db()
+course_portal.init_db()
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
@@ -87,7 +91,7 @@ _original_nav = public_site.nav
 def branded_nav():
     html = brand_text(_original_nav())
     old = '<div class="navlinks"><a href="/#tools">工具</a><a href="/#about">关于</a><a class="admin-link" href="/manage">管理</a></div>'
-    new = '''<div class="navlinks"><a href="/#tools">工具</a><a href="/bounties">需求</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
+    new = '''<div class="navlinks"><a href="/tools">工具</a><a href="/courses">课程</a><a href="/bounties">需求</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
     return html.replace(old, new)
 
 
@@ -131,6 +135,8 @@ def account_session(request: Request):
 app.include_router(community_portal.router, prefix="/account")
 app.include_router(community_portal.developer_router, prefix="/developer")
 app.include_router(bounty_portal.router)
+app.include_router(course_portal.router)
+app.include_router(toolboard_portal.router)
 
 _original_admin_page = admin_portal.admin_page
 
