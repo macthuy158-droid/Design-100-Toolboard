@@ -37,10 +37,12 @@ def dashboard(request: Request):
         pending=conn.execute("SELECT COUNT(*) c FROM tool_submissions WHERE status='pending'").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tool_submissions'").fetchone() else 0
         tools=conn.execute("SELECT COUNT(*) c FROM tools").fetchone()['c']
         users=conn.execute("SELECT COUNT(*) c FROM community_users").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='community_users'").fetchone() else 0
-    body=f'''<div class="admin-shell"><div class="admin-head"><div><div class="eyebrow">DESIGN 100 · ADMIN</div><h1>管理后台</h1><div class="admin-sub">只保留三个核心功能。</div></div><button class="btn secondary" onclick="fetch('/manage/logout',{{method:'POST'}}).then(()=>location.href='/manage/')">退出</button></div><div class="admin-home">
+        courses=conn.execute("SELECT COUNT(*) c FROM courses").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='courses'").fetchone() else 0
+    body=f'''<div class="admin-shell"><div class="admin-head"><div><div class="eyebrow">DESIGN 100 · ADMIN</div><h1>管理后台</h1><div class="admin-sub">工具、用户与官方课程的维护入口。</div></div><button class="btn secondary" onclick="fetch('/manage/logout',{{method:'POST'}}).then(()=>location.href='/manage/')">退出</button></div><div class="admin-home">
     <a class="entry" href="/manage/community/review"><b>{pending}</b><h2>投稿审核</h2><p>审核新工具和版本更新。</p></a>
     <a class="entry" href="/manage/tools/"><b>{tools}</b><h2>工具管理</h2><p>修改资料、价格、上下架，查看版本历史。</p></a>
     <a class="entry" href="/manage/community/users"><b>{users}</b><h2>用户管理</h2><p>管理小飞侠与小游侠账号。</p></a>
+    <a class="entry" href="/courses/manage"><b>{courses}</b><h2>课程管理</h2><p>创建官方设计课程，维护课时与上下架。</p></a>
     </div></div>'''
     return HTMLResponse(admin_page(body))
 
