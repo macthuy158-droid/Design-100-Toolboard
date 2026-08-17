@@ -207,6 +207,13 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_submissions_status ON tool_submissions(status,id DESC);
         CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id,id DESC);
         ''')
+        sub_cols = {r['name'] for r in conn.execute("PRAGMA table_info(tool_submissions)").fetchall()}
+        if 'tool_type' not in sub_cols:
+            conn.execute("ALTER TABLE tool_submissions ADD COLUMN tool_type TEXT NOT NULL DEFAULT 'desktop'")
+        if 'app_url' not in sub_cols:
+            conn.execute("ALTER TABLE tool_submissions ADD COLUMN app_url TEXT NOT NULL DEFAULT ''")
+        conn.executescript('''
+        ''')
         cols = {r['name'] for r in conn.execute("PRAGMA table_info(tools)").fetchall()}
         if 'owner_user_id' not in cols:
             conn.execute("ALTER TABLE tools ADD COLUMN owner_user_id INTEGER")

@@ -210,9 +210,12 @@ def approve(request: Request, submission_id: int):
         s=conn.execute("SELECT s.*,u.display_name FROM tool_submissions s JOIN community_users u ON u.id=s.user_id WHERE s.id=? AND s.status='pending'", (submission_id,)).fetchone()
         if not s: raise HTTPException(404, "待审核投稿不存在。")
         stamp=core.now()
-        if s['submission_type']=='new_tool':
+        sub_tool_type=s['tool_type'] if 'tool_type' in s.keys() else 'desktop'
+        sub_app_url=s['app_url'] if 'app_url' in s.keys() else ''
+        is_web=sub_tool_type=='web_app'
+        if s['submission_type'] in ('new_tool','new_web_app'):
             if conn.execute("SELECT id FROM tools WHERE slug=?", (s['slug'],)).fetchone(): raise HTTPException(409, "Slug 已存在。")
-            cur=conn.execute("INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,screenshots,downloads,active,created_at,updated_at,owner_user_id,price_cents,developer_name) VALUES(?,?,?,?,?,?,?,'',0,1,?,?,?,?,?)", (s['slug'],s['name'],s['tagline'],s['description'],s['category'],s['platform'],s['icon_text'],stamp,stamp,s['user_id'],s['price_cents'],s['display_name']))
+            cur=conn.execute("INSERT INTO tools(slug,name,tagline,description,category,platform,icon_text,screenshots,downloads,active,created_at,updated_at,owner_user_id,price_cents,developer_name,tool_type,app_url) VALUES(?,?,?,?,?,?,?,'',0,1,?,?,?,?,?,?,?)", (s['slug'],s['name'],s['tagline'],s['description'],s['category'],s['platform'],s['icon_text'],stamp,stamp,s['user_id'],s['price_cents'],s['display_name'],sub_tool_type,sub_app_url))
             tool_id=cur.lastrowid
         elif s['submission_type']=='new_release':
             tool_id=s['tool_id']
@@ -223,14 +226,18 @@ def approve(request: Request, submission_id: int):
         else:
             raise HTTPException(400, "投稿类型无效。")
 
-        target_dir=site.PACKAGE_DIR/s['slug']; target_dir.mkdir(parents=True,exist_ok=True)
-        source=Path(s['package_path'])
-        if not source.exists(): raise HTTPException(404, "投稿安装包不存在。")
-        target=target_dir/s['package_name']
-        if target.exists(): target=target_dir/f"{submission_id}-{s['package_name']}"
-        shutil.copy2(source,target)
-        conn.execute("UPDATE releases SET active=0 WHERE tool_id=?", (tool_id,))
-        conn.execute("INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)", (tool_id,s['version'],s['notes'],target.name,str(target),s['sha256'],s['size'],stamp))
+        if is_web:
+            conn.execute("UPDATE releases SET active=0 WHERE tool_id=?", (tool_id,))
+            conn.execute("INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)", (tool_id,s['version'],s['notes'],'','','',0,stamp))
+        else:
+            target_dir=site.PACKAGE_DIR/s['slug']; target_dir.mkdir(parents=True,exist_ok=True)
+            source=Path(s['package_path'])
+            if not source.exists(): raise HTTPException(404, "投稿安装包不存在。")
+            target=target_dir/s['package_name']
+            if target.exists(): target=target_dir/f"{submission_id}-{s['package_name']}"
+            shutil.copy2(source,target)
+            conn.execute("UPDATE releases SET active=0 WHERE tool_id=?", (tool_id,))
+            conn.execute("INSERT INTO releases(tool_id,version,notes,package_name,package_path,sha256,size,published_at,active) VALUES(?,?,?,?,?,?,?,?,1)", (tool_id,s['version'],s['notes'],target.name,str(target),s['sha256'],s['size'],stamp))
         conn.execute("UPDATE tool_submissions SET status='approved',reviewed_at=? WHERE id=?", (stamp,submission_id))
     return RedirectResponse('/manage/community/review', 303)
 

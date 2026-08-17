@@ -6,6 +6,7 @@ kept out of the large portal module.
 """
 
 from pathlib import Path
+from typing import Optional
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
@@ -41,10 +42,11 @@ def install_streaming_submit(router):
         category: str = Form(core.DEFAULT_TOOL_CATEGORY),
         platform: str = Form("Windows"),
         icon_text: str = Form("100"),
-        price_yuan: float = Form(...),
+        price_yuan: float = Form(0),
         version: str = Form(...),
         notes: str = Form(""),
-        package: UploadFile = File(...),
+        app_url: str = Form(""),
+        package: Optional[UploadFile] = File(None),
     ):
         core.init_db()
         user = core.current_user(request)
@@ -52,12 +54,12 @@ def install_streaming_submit(router):
             raise HTTPException(status_code=401, detail="请先登录。")
         if user["role"] != core.ROLE_XIAOFEIXIA:
             raise HTTPException(status_code=403, detail="只有小飞侠开发者可以发布工具。")
-        if price_yuan <= 0:
-            raise HTTPException(status_code=400, detail="同行价格必须大于 0 元。")
 
         clean_version = version.strip()
         if not clean_version:
             raise HTTPException(status_code=400, detail="版本号不能为空。")
+
+        is_web_app = submission_type == "new_web_app"
 
         tool = None
         if submission_type == "new_release":
@@ -77,26 +79,48 @@ def install_streaming_submit(router):
             category = tool["category"]
             platform = tool["platform"]
             icon_text = tool["icon_text"]
-        elif submission_type == "new_tool":
+        elif submission_type in ("new_tool", "new_web_app"):
             if not name.strip():
                 raise HTTPException(status_code=400, detail="工具名称不能为空。")
             slug = core.slug_from_name(name)
             if category not in core.TOOL_CATEGORIES:
                 raise HTTPException(status_code=400, detail="请选择有效的工具分类。")
+            if is_web_app:
+                clean_url = app_url.strip()
+                if not clean_url or not clean_url.startswith("http"):
+                    raise HTTPException(status_code=400, detail="请填写有效的工具访问地址（以 http 开头）。")
+                platform = "Web"
+                if price_yuan < 0:
+                    raise HTTPException(status_code=400, detail="价格不能为负数。")
+            else:
+                if price_yuan <= 0:
+                    raise HTTPException(status_code=400, detail="同行价格必须大于 0 元。")
         else:
             raise HTTPException(status_code=400, detail="投稿类型无效。")
 
-        fallback_name = f"{slug}-{clean_version}.zip"
-        folder = core.SUBMISSION_DIR / str(user["id"])
-        try:
-            saved = await save_upload_stream(
-                package,
-                folder,
-                fallback_name=fallback_name,
-                max_bytes=core.MAX_UPLOAD_BYTES,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        saved_package_name = ""
+        saved_path = ""
+        saved_sha256 = ""
+        saved_size = 0
+
+        if not is_web_app:
+            if not package or not package.filename:
+                raise HTTPException(status_code=400, detail="请上传安装包。")
+            fallback_name = f"{slug}-{clean_version}.zip"
+            folder = core.SUBMISSION_DIR / str(user["id"])
+            try:
+                saved = await save_upload_stream(
+                    package,
+                    folder,
+                    fallback_name=fallback_name,
+                    max_bytes=core.MAX_UPLOAD_BYTES,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            saved_package_name = saved.package_name
+            saved_path = str(saved.path)
+            saved_sha256 = saved.sha256
+            saved_size = saved.size
 
         try:
             with site.db() as conn:
@@ -104,8 +128,9 @@ def install_streaming_submit(router):
                     """INSERT INTO tool_submissions(
                         user_id,submission_type,tool_id,slug,name,tagline,description,
                         category,platform,icon_text,price_cents,version,notes,
-                        package_name,package_path,sha256,size,status,created_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)""",
+                        package_name,package_path,sha256,size,status,created_at,
+                        tool_type,app_url
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
                     (
                         user["id"],
                         submission_type,
@@ -120,15 +145,18 @@ def install_streaming_submit(router):
                         int(round(price_yuan * 100)),
                         clean_version,
                         notes.strip(),
-                        saved.package_name,
-                        str(saved.path),
-                        saved.sha256,
-                        saved.size,
+                        saved_package_name,
+                        saved_path,
+                        saved_sha256,
+                        saved_size,
                         core.now(),
+                        "web_app" if is_web_app else "desktop",
+                        app_url.strip() if is_web_app else "",
                     ),
                 )
         except Exception:
-            Path(saved.path).unlink(missing_ok=True)
+            if saved_path:
+                Path(saved_path).unlink(missing_ok=True)
             raise
 
         return RedirectResponse("/account/me", status_code=303)
