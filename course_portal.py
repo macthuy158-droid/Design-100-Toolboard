@@ -8,7 +8,7 @@ Lessons carry an external video URL; no media is hosted on this box.
 import re
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 import app_v2 as site
@@ -129,12 +129,8 @@ def user(request):
 
 
 def is_admin(request):
+    """Admins may preview unpublished courses; authoring lives in /manage."""
     return site.valid_session(request)
-
-
-def require_admin(request):
-    if not is_admin(request):
-        raise HTTPException(403, "只有管理员可以维护官方课程。")
 
 
 def login_redirect(path):
@@ -203,72 +199,11 @@ def list_courses(request: Request, category: str = '', level: str = ''):
 <div class="cfoot"><div class="money">{money(c['price_cents'])}<small>{site.esc(c['instructor'])} · {int(c['student_count'] or 0)} 人学过</small></div><div class="arrow">↗</div></div></a>''' for c in rows)
 
     u = user(request)
-    manage = '<a class="btn secondary" href="/courses/manage">课程管理</a>' if is_admin(request) else ''
     mine = '<a class="btn secondary" href="/courses/mine">我的课程</a>' if u else ''
-    body = f'''<div class="cw"><div class="ch"><div><div class="ey">DESIGN 100% · COURSES</div><h1>小飞侠设计课程</h1><div class="lead">官方出品的设计课程体系。把工具背后的方法讲清楚 —— 设计流程、插件用法与参数化经验，帮设计师少走弯路。</div></div><div class="actions">{mine}{manage}</div></div>
+    body = f'''<div class="cw"><div class="ch"><div><div class="ey">DESIGN 100% · COURSES</div><h1>小飞侠设计课程</h1><div class="lead">官方出品的设计课程体系。把工具背后的方法讲清楚 —— 设计流程、插件用法与参数化经验，帮设计师少走弯路。</div></div><div class="actions">{mine}</div></div>
 <div class="filters">{cf}</div><div class="filters">{lf}</div>
 <div class="cgrid">{cards if cards else '<div class="empty">课程正在筹备中，敬请期待。</div>'}</div></div>'''
     return HTMLResponse(page(body))
-
-
-@router.get('/manage', response_class=HTMLResponse)
-def manage(request: Request):
-    init_db()
-    require_admin(request)
-    with site.db() as conn:
-        rows = conn.execute(_stats_sql('')).fetchall()
-    body_rows = ''.join(
-        f'<tr><td><a href="/courses/{c["id"]}">{site.esc(c["title"])}</a></td><td>{site.esc(STATUSES.get(c["status"], c["status"]))}</td><td>{site.esc(c["category"])} · {site.esc(c["level"])}</td><td>{int(c["lesson_count"] or 0)}</td><td>{int(c["student_count"] or 0)}</td><td>{money(c["price_cents"])}</td></tr>'
-        for c in rows) or '<tr><td colspan="6">还没有创建课程</td></tr>'
-    body = f'''<div class="cw"><div class="ch"><div><div class="ey">COURSE ADMIN</div><h1>课程管理</h1><div class="lead">官方课程的创建、课时维护与上下架。</div></div><div class="actions"><a class="btn" href="/courses/new">新建课程</a><a class="btn secondary" href="/courses">课程列表</a></div></div>
-<div class="panel"><table class="table"><thead><tr><th>课程</th><th>状态</th><th>分类</th><th>课时</th><th>学员</th><th>价格</th></tr></thead><tbody>{body_rows}</tbody></table></div></div>'''
-    return HTMLResponse(page(body, '课程管理 · 小飞侠设计100%'))
-
-
-@router.get('/new', response_class=HTMLResponse)
-def new_course(request: Request):
-    init_db()
-    require_admin(request)
-    cats = ''.join(f'<option value="{site.esc(c)}">{site.esc(c)}</option>' for c in CATEGORIES)
-    lvls = ''.join(f'<option value="{site.esc(v)}">{site.esc(v)}</option>' for v in LEVELS)
-    body = f'''<div class="cw"><div class="ch"><div><div class="ey">NEW COURSE</div><h1>新建课程</h1><div class="lead">先建立课程框架，创建后再逐节添加课时与视频链接。内容完整后再发布上架。</div></div><a class="btn secondary" href="/courses/manage">返回课程管理</a></div>
-<div class="panel"><div class="note">课程创建后为草稿状态，只有管理员可见。添加完课时后点击「发布上架」才会出现在课程列表。</div>
-<form action="/courses/new" method="post"><div class="field"><label>课程名称</label><input name="title" maxlength="120" required></div>
-<div class="formgrid"><div class="field"><label>分类</label><select name="category">{cats}</select></div><div class="field"><label>难度</label><select name="level">{lvls}</select></div>
-<div class="field"><label>讲师署名</label><input name="instructor" maxlength="40" value="{site.esc(DEFAULT_INSTRUCTOR)}"></div><div class="field"><label>封面文字（2-4 字）</label><input name="cover_text" maxlength="6" value="100"></div></div>
-<div class="field"><label>价格（元，0 为免费）</label><input name="price_yuan" type="number" min="0" max="100000" step="1" value="0"></div>
-<div class="field"><label>一句话简介</label><input name="summary" maxlength="200" required></div>
-<div class="field"><label>课程详细说明</label><textarea name="description" rows="10" maxlength="10000" required></textarea></div>
-<button class="btn">创建课程</button></form></div></div>'''
-    return HTMLResponse(page(body, '新建课程 · 小飞侠设计100%'))
-
-
-@router.post('/new')
-def create_course(request: Request, title: str = Form(...), category: str = Form('其他'), level: str = Form('入门'),
-                  summary: str = Form(''), description: str = Form(...), cover_text: str = Form('100'),
-                  instructor: str = Form(DEFAULT_INSTRUCTOR), price_yuan: float = Form(0)):
-    init_db()
-    require_admin(request)
-    title = title.strip()
-    description = description.strip()
-    if not title or len(title) > 120:
-        raise HTTPException(400, '课程名称不能为空，且最多 120 字。')
-    if not description or len(description) > 10000:
-        raise HTTPException(400, '课程说明不能为空，且最多 10000 字。')
-    if category not in CATEGORIES:
-        raise HTTPException(400, '请选择有效分类。')
-    if level not in LEVELS:
-        raise HTTPException(400, '请选择有效难度。')
-    if price_yuan < 0 or price_yuan > 100000:
-        raise HTTPException(400, '价格需在 0—100,000 元之间。')
-    stamp = core.now()
-    with site.db() as conn:
-        cur = conn.execute('''INSERT INTO courses(instructor,title,category,level,summary,description,cover_text,price_cents,status,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,'draft',?,?)''',
-            ((instructor.strip() or DEFAULT_INSTRUCTOR)[:40], title, category, level, summary.strip()[:200],
-             description, (cover_text.strip() or '100')[:6], int(round(price_yuan * 100)), stamp, stamp))
-        cid = cur.lastrowid
-    return RedirectResponse(f'/courses/{cid}', 303)
 
 
 @router.get('/mine', response_class=HTMLResponse)
@@ -291,7 +226,12 @@ def mine(request: Request):
 
 
 @router.get('/{course_id}', response_class=HTMLResponse)
-def detail(request: Request, course_id: int):
+def detail(request: Request, course_id: str):
+    # Declared as a string so retired authoring paths such as /courses/new
+    # answer with a clean 404 instead of a validation error.
+    if not course_id.isdigit():
+        raise HTTPException(404, '课程不存在。')
+    course_id = int(course_id)
     init_db()
     u = user(request)
     admin = is_admin(request)
@@ -319,22 +259,12 @@ def detail(request: Request, course_id: int):
         else:
             right = '<span class="lock">🔒 报名后解锁</span>'
         tag = '<span class="free">试看</span>' if int(l['free_preview'] or 0) == 1 and not unlocked else ''
-        drop = f'<form action="/courses/{course_id}/lessons/{l["id"]}/delete" method="post" style="display:inline"><button class="btn secondary" style="height:36px">删除</button></form>' if admin else ''
-        items.append(f'''<div class="lesson"><span class="lesson-idx">{i:02d}</span><div class="lesson-main"><div class="lesson-title">{site.esc(l['title'])} {tag}</div><div class="lesson-meta">{int(l['duration_minutes'] or 0)} 分钟</div></div><div class="actions">{right}{drop}</div></div>''')
+        items.append(f'''<div class="lesson"><span class="lesson-idx">{i:02d}</span><div class="lesson-main"><div class="lesson-title">{site.esc(l['title'])} {tag}</div><div class="lesson-meta">{int(l['duration_minutes'] or 0)} 分钟</div></div><div class="actions">{right}</div></div>''')
     lesson_html = ''.join(items) or '<div class="empty">课程还没有添加课时。</div>'
-
-    add_form = f'''<div class="panel" style="margin-top:16px"><h2>添加课时</h2><form action="/courses/{course_id}/lessons" method="post">
-<div class="field"><label>课时标题</label><input name="title" maxlength="120" required></div>
-<div class="field"><label>视频链接（可选，支持任意视频平台地址）</label><input name="video_url" placeholder="https://..."></div>
-<div class="formgrid"><div class="field"><label>时长（分钟）</label><input name="duration_minutes" type="number" min="0" max="600" value="10"></div>
-<div class="field"><label>是否允许试看</label><select name="free_preview"><option value="0">否</option><option value="1">是（未报名也能看）</option></select></div></div>
-<button class="btn">添加课时</button></form></div>''' if admin else ''
 
     buttons = []
     if admin:
-        nxt = 'published' if c['status'] == 'draft' else 'draft'
-        label = '发布上架' if c['status'] == 'draft' else '下架为草稿'
-        buttons.append(f'<form action="/courses/{course_id}/status" method="post"><input type="hidden" name="status" value="{nxt}"><button class="btn">{label}</button></form>')
+        buttons.append(f'<a class="btn" href="/manage/courses/{course_id}">在后台管理</a>')
     if not u:
         buttons.append(f'<a class="btn{" secondary" if admin else ""}" href="/account/login?next=/courses/{course_id}">登录后学习</a>')
     elif u['role'] == core.ROLE_XIAOFEIXIA or enrolled:
@@ -346,7 +276,7 @@ def detail(request: Request, course_id: int):
 
     price_note = ('小飞侠：院内账号免费学习全部官方课程。' if u and u['role'] == core.ROLE_XIAOFEIXIA
                   else ('免费课程，登录后即可报名学习。' if price <= 0 else '付费课程，统一支付接入后开放购买。'))
-    draft_note = '<div class="note">当前为草稿状态，只有管理员能看到这个页面。</div>' if admin and c['status'] == 'draft' else ''
+    draft_note = '<div class="note">当前为草稿状态，只有管理员能看到这个页面。这是公开页预览，编辑请到后台课程管理。</div>' if admin and c['status'] == 'draft' else ''
     status_badge = f'<span class="status {"draft" if c["status"] == "draft" else ""}">{site.esc(STATUSES.get(c["status"], c["status"]))}</span>' if admin else ''
 
     side = f'''<div class="panel"><h3 style="margin-top:0">课程信息</h3><div class="money" style="font-size:26px">{money(price)}</div>
@@ -355,57 +285,9 @@ def detail(request: Request, course_id: int):
 
     body = f'''<div class="cw"><div class="ch"><div><div class="ey">COURSE #{c['id']}</div><h1>{site.esc(c['title'])}</h1><div class="actions"><span class="official">官方课程</span><span class="chip">{site.esc(c['category'])}</span><span class="chip">{site.esc(c['level'])}</span>{status_badge}</div></div><a class="btn secondary" href="/courses">返回课程列表</a></div>
 {draft_note}<div class="layout"><div><div class="panel"><h2>课程介绍</h2><div class="body">{site.esc(c['description'])}</div></div>
-<div class="panel" style="margin-top:16px"><h2>课程目录 <span class="lesson-meta">{len(lessons)} 节</span></h2>{lesson_html}</div>{add_form}</div>
+<div class="panel" style="margin-top:16px"><h2>课程目录 <span class="lesson-meta">{len(lessons)} 节</span></h2>{lesson_html}</div></div>
 <div>{side}</div></div></div>'''
     return HTMLResponse(page(body, f"{c['title']} · 小飞侠设计课程"))
-
-
-@router.post('/{course_id}/lessons')
-def add_lesson(request: Request, course_id: int, title: str = Form(...), video_url: str = Form(''),
-               duration_minutes: int = Form(0), free_preview: int = Form(0)):
-    init_db()
-    require_admin(request)
-    title = title.strip()
-    if not title or len(title) > 120:
-        raise HTTPException(400, '课时标题不能为空，且最多 120 字。')
-    if duration_minutes < 0 or duration_minutes > 600:
-        raise HTTPException(400, '时长需在 0—600 分钟之间。')
-    stamp = core.now()
-    with site.db() as conn:
-        if not conn.execute('SELECT 1 FROM courses WHERE id=?', (course_id,)).fetchone():
-            raise HTTPException(404, '课程不存在。')
-        nxt = conn.execute('SELECT COALESCE(MAX(sort_order),0)+1 n FROM course_lessons WHERE course_id=?', (course_id,)).fetchone()['n']
-        conn.execute('INSERT INTO course_lessons(course_id,title,video_url,duration_minutes,sort_order,free_preview,created_at) VALUES(?,?,?,?,?,?,?)',
-                     (course_id, title, safe_url(video_url), duration_minutes, nxt, 1 if int(free_preview or 0) == 1 else 0, stamp))
-        conn.execute('UPDATE courses SET updated_at=? WHERE id=?', (stamp, course_id))
-    return RedirectResponse(f'/courses/{course_id}', 303)
-
-
-@router.post('/{course_id}/lessons/{lesson_id}/delete')
-def delete_lesson(request: Request, course_id: int, lesson_id: int):
-    init_db()
-    require_admin(request)
-    with site.db() as conn:
-        conn.execute('DELETE FROM course_lessons WHERE id=? AND course_id=?', (lesson_id, course_id))
-        conn.execute('UPDATE courses SET updated_at=? WHERE id=?', (core.now(), course_id))
-    return RedirectResponse(f'/courses/{course_id}', 303)
-
-
-@router.post('/{course_id}/status')
-def set_status(request: Request, course_id: int, status: str = Form(...)):
-    init_db()
-    require_admin(request)
-    if status not in STATUSES:
-        raise HTTPException(400, '状态不正确。')
-    with site.db() as conn:
-        if not conn.execute('SELECT 1 FROM courses WHERE id=?', (course_id,)).fetchone():
-            raise HTTPException(404, '课程不存在。')
-        if status == 'published':
-            n = conn.execute('SELECT COUNT(*) n FROM course_lessons WHERE course_id=?', (course_id,)).fetchone()['n']
-            if not n:
-                raise HTTPException(409, '至少添加一节课时后才能发布。')
-        conn.execute('UPDATE courses SET status=?,updated_at=? WHERE id=?', (status, core.now(), course_id))
-    return RedirectResponse(f'/courses/{course_id}', 303)
 
 
 @router.post('/{course_id}/enroll')

@@ -42,7 +42,7 @@ def dashboard(request: Request):
     <a class="entry" href="/manage/community/review"><b>{pending}</b><h2>投稿审核</h2><p>审核新工具和版本更新。</p></a>
     <a class="entry" href="/manage/tools/"><b>{tools}</b><h2>工具管理</h2><p>修改资料、价格、上下架，查看版本历史。</p></a>
     <a class="entry" href="/manage/community/users"><b>{users}</b><h2>用户管理</h2><p>管理小飞侠与小游侠账号。</p></a>
-    <a class="entry" href="/courses/manage"><b>{courses}</b><h2>课程管理</h2><p>创建官方设计课程，维护课时与上下架。</p></a>
+    <a class="entry" href="/manage/courses/"><b>{courses}</b><h2>课程管理</h2><p>创建官方设计课程，维护课时与上下架。</p></a>
     </div></div>'''
     return HTMLResponse(admin_page(body))
 

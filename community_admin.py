@@ -30,6 +30,7 @@ def admin_nav(active=""):
     <a class="btn secondary" href="/manage/tools/">工具管理</a>
     <a class="btn {'secondary' if active!='users' else ''}" href="/manage/community/users">用户管理</a>
     <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
+    <a class="btn secondary" href="/manage/courses/">课程管理</a>
     </div>'''
 
 

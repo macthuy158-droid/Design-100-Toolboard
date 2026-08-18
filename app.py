@@ -22,6 +22,7 @@ community_core.init_db()
 
 import bounty_portal  # noqa: E402
 import community_admin  # noqa: E402
+import course_admin  # noqa: E402
 import course_portal  # noqa: E402
 import homepage_portal  # noqa: E402
 import toolboard_portal  # noqa: E402
@@ -151,4 +152,5 @@ def branded_admin_page(body, title=f"{BRAND_NAME} · 管理后台"):
 
 admin_portal.admin_page = branded_admin_page
 admin_portal.app.mount("/community", community_admin.app)
+admin_portal.app.mount("/courses", course_admin.app)
 app.mount("/manage", admin_portal.app)
