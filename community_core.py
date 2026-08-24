@@ -266,7 +266,11 @@ def can_download(conn, user, tool):
     if not user or not user['active']:
         return False
     if user['role'] == ROLE_XIAOFEIXIA:
-        return True
+        import coin_core
+        price = coin_core.coin_price(tool)
+        if price <= 0 or coin_core.is_owner(tool, user['id']):
+            return True
+        return coin_core.has_access(conn, user['id'], tool['id'])
     return bool(conn.execute(
         "SELECT e.id FROM entitlements e JOIN orders o ON o.id=e.order_id "
         "WHERE e.user_id=? AND e.tool_id=? AND o.status='paid' AND o.amount_cents>0 LIMIT 1",

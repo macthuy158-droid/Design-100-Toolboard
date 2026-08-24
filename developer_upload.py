@@ -43,6 +43,7 @@ def install_streaming_submit(router):
         platform: str = Form("Windows"),
         icon_text: str = Form("100"),
         price_yuan: float = Form(0),
+        coin_price: int = Form(0),
         version: str = Form(...),
         notes: str = Form(""),
         app_url: str = Form(""),
@@ -58,6 +59,8 @@ def install_streaming_submit(router):
         clean_version = version.strip()
         if not clean_version:
             raise HTTPException(status_code=400, detail="版本号不能为空。")
+        if coin_price < 0 or coin_price > 9999:
+            raise HTTPException(status_code=400, detail="飞侠币价格需在 0—9999 之间。")
 
         is_web_app = submission_type == "new_web_app"
 
@@ -129,8 +132,8 @@ def install_streaming_submit(router):
                         user_id,submission_type,tool_id,slug,name,tagline,description,
                         category,platform,icon_text,price_cents,version,notes,
                         package_name,package_path,sha256,size,status,created_at,
-                        tool_type,app_url
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
+                        tool_type,app_url,coin_price
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)""",
                     (
                         user["id"],
                         submission_type,
@@ -152,6 +155,7 @@ def install_streaming_submit(router):
                         core.now(),
                         "web_app" if is_web_app else "desktop",
                         app_url.strip() if is_web_app else "",
+                        coin_price,
                     ),
                 )
         except Exception:

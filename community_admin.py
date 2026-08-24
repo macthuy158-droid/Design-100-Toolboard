@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 import app_v2 as site
 import admin_portal
+import coin_core
 import community_core as core
 
 app = FastAPI(title="Community Admin", docs_url=None, redoc_url=None, openapi_url=None)
@@ -226,6 +227,10 @@ def approve(request: Request, submission_id: int):
             conn.execute("UPDATE tools SET price_cents=?,developer_name=?,updated_at=? WHERE id=?", (s['price_cents'],s['display_name'],stamp,tool_id))
         else:
             raise HTTPException(400, "投稿类型无效。")
+
+        sub_coin=int((s['coin_price'] if 'coin_price' in s.keys() else 0) or 0)
+        conn.execute("UPDATE tools SET coin_price=? WHERE id=?", (sub_coin,tool_id))
+        coin_core.grant_publish_reward(conn, s['user_id'], submission_id, tool_id, note=s['name'] or s['slug'])
 
         if is_web:
             conn.execute("UPDATE releases SET active=0 WHERE tool_id=?", (tool_id,))

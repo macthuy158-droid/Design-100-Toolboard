@@ -21,17 +21,19 @@ community_core.init_db = once_per_process(community_core.init_db)
 community_core.init_db()
 
 import bounty_portal  # noqa: E402
+import coin_core  # noqa: E402
 import community_admin  # noqa: E402
 import course_admin  # noqa: E402
 import course_portal  # noqa: E402
 import homepage_portal  # noqa: E402
 import toolboard_portal  # noqa: E402
 
-# Bounty and course schemas are deliberately isolated from the existing
+# Bounty, course and coin schemas are deliberately isolated from the existing
 # tool/community migrations so the new features can evolve without
 # destabilising Tool Store.
 bounty_portal.init_db()
 course_portal.init_db()
+coin_core.init_db()
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
