@@ -52,8 +52,9 @@ def _remove_existing_home(app):
     ]
 
 
-def _money(cents):
-    return f"¥{int(cents or 0) / 100:,.0f}"
+def _reward(row):
+    import coin_core
+    return f"{int(row['reward'] or 0):,} {coin_core.label(row['currency'])}"
 
 
 def install_homepage(app, site):
@@ -82,7 +83,7 @@ def install_homepage(app, site):
             bounties = []
             if has_bounties:
                 bounties = conn.execute(
-                    '''SELECT id,title,category,budget_cents,deadline
+                    '''SELECT id,title,category,reward,currency,deadline
                        FROM bounties
                        WHERE status='open'
                        ORDER BY id DESC
@@ -90,7 +91,7 @@ def install_homepage(app, site):
                 ).fetchall()
 
         bounty_rows = "".join(
-            f'''<a class="home-bounty-row" href="/bounties/{b['id']}"><div class="home-bounty-category">{site.esc(b['category'])}</div><div><div class="home-bounty-title">{site.esc(b['title'])}</div><div class="home-bounty-meta">招募中 · 截止 {site.esc(b['deadline'] or '不限')}</div></div><div class="home-bounty-money">{_money(b['budget_cents'])}</div><div class="home-bounty-arrow">↗</div></a>'''
+            f'''<a class="home-bounty-row" href="/bounties/{b['id']}"><div class="home-bounty-category">{site.esc(b['category'])}</div><div><div class="home-bounty-title">{site.esc(b['title'])}</div><div class="home-bounty-meta">招募中 · 截止 {site.esc(b['deadline'] or '不限')}</div></div><div class="home-bounty-money">{_reward(b)}</div><div class="home-bounty-arrow">↗</div></a>'''
             for b in bounties
         )
         if not bounty_rows:

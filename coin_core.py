@@ -31,6 +31,9 @@ REASON_LABELS = {
     "publish_reward": "发布工具奖励",
     "download_spend": "下载工具支出",
     "download_income": "工具被下载收入",
+    "bounty_escrow": "发布悬赏冻结",
+    "bounty_refund": "悬赏取消退回",
+    "bounty_payout": "悬赏赏金收入",
     "admin_adjust": "管理员充值 / 调整",
 }
 
@@ -189,6 +192,30 @@ def purchase(conn, buyer, tool, currency):
         _record(conn, int(owner), currency, price, "download_income", tool_id=tool["id"],
                 ref=str(buyer["id"]), note=f"{tool['name']} · {buyer['display_name']}")
     return price
+
+
+def spend(conn, user_id, currency, amount, reason, ref="", note=""):
+    """Debit a balance, refusing to go negative. Used for bounty escrow."""
+    amount = int(amount)
+    if amount <= 0:
+        return 0
+    available = balance(conn, user_id, currency)
+    if available < amount:
+        raise HTTPException(
+            409,
+            f"{label(currency)}不足：需要 {amount} 个，当前余额 {available} 个。",
+        )
+    _record(conn, user_id, currency, -amount, reason, ref=ref or now(), note=note)
+    return amount
+
+
+def credit(conn, user_id, currency, amount, reason, ref="", note=""):
+    """Credit a balance — a bounty refund or payout."""
+    amount = int(amount)
+    if amount <= 0:
+        return 0
+    _record(conn, user_id, currency, amount, reason, ref=ref or now(), note=note)
+    return amount
 
 
 def adjust(conn, user_id, currency, delta, note=""):
