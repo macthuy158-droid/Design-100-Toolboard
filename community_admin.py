@@ -12,7 +12,7 @@ import community_core as core
 app = FastAPI(title="Community Admin", docs_url=None, redoc_url=None, openapi_url=None)
 
 CSS = '''<style>
-.wrap{max-width:1100px;margin:34px auto;padding:0 20px 70px}.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:24px}.top h1{margin:5px 0 0;font-size:30px}.nav{display:flex;gap:8px;flex-wrap:wrap}.card{background:#fff;border:1px solid #e6e6e3;border-radius:22px;padding:22px;margin-bottom:14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#eee;font-size:9px}.pending{background:#fff2c7}.ok{background:#e2f3e5}.off{background:#f3dede}.actions{display:flex;gap:7px;flex-wrap:wrap}.mini{height:32px!important;padding:0 10px!important;font-size:10px!important}.muted{font-size:11px;color:#888;line-height:1.7}.summary{display:flex;gap:10px;margin:16px 0 22px;flex-wrap:wrap}.stat{background:#f5f5f2;border-radius:14px;padding:13px 16px;min-width:120px}.stat b{display:block;font-size:20px}.stat span{font-size:9px;color:#888}.table-wrap{overflow-x:auto}.table{width:100%;min-width:760px}.review-item{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center}.review-main h3{margin:0 0 7px;font-size:18px}.review-meta{font-size:11px;color:#777;line-height:1.8}.review-note{margin-top:10px;padding:11px 13px;border-radius:12px;background:#f6f6f3;font-size:11px;color:#666;white-space:pre-line}.price-change{font-weight:750;color:#111}.empty{padding:40px 20px;text-align:center;color:#888}.section-title{font-size:13px;font-weight:720;color:#777;margin:24px 0 10px}@media(max-width:760px){.top{align-items:flex-start;flex-direction:column}.grid{grid-template-columns:1fr}.review-item{grid-template-columns:1fr}.review-actions{justify-self:start}}
+.wrap{max-width:1100px;margin:34px auto;padding:0 20px 70px}.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:24px}.top h1{margin:5px 0 0;font-size:30px}.nav{display:flex;gap:8px;flex-wrap:wrap}.card{background:#fff;border:1px solid #e6e6e3;border-radius:22px;padding:22px;margin-bottom:14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#eee;font-size:9px}.pending{background:#fff2c7}.ok{background:#e2f3e5}.off{background:#f3dede}.actions{display:flex;gap:7px;flex-wrap:wrap}.mini{height:32px!important;padding:0 10px!important;font-size:10px!important}.muted{font-size:11px;color:#888;line-height:1.7}.summary{display:flex;gap:10px;margin:16px 0 22px;flex-wrap:wrap}.stat{background:#f5f5f2;border-radius:14px;padding:13px 16px;min-width:120px}.stat b{display:block;font-size:20px}.stat span{font-size:9px;color:#888}.table-wrap{overflow-x:auto}.table{width:100%;min-width:760px}.review-item{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center}.review-main h3{margin:0 0 7px;font-size:18px}.review-meta{font-size:11px;color:#777;line-height:1.8}.review-note{margin-top:10px;padding:11px 13px;border-radius:12px;background:#f6f6f3;font-size:11px;color:#666;white-space:pre-line}.price-change{font-weight:750;color:#111}.empty{padding:40px 20px;text-align:center;color:#888}.section-title{font-size:13px;font-weight:720;color:#777;margin:24px 0 10px}.card h2{margin:0 0 15px;font-size:19px}.coin-adjust{display:flex;gap:6px;align-items:center}.coin-adjust input{height:30px;border:1px solid #d7d7d3;border-radius:8px;padding:0 8px;background:#fff;font-size:11px}.coin-adjust input[name=delta]{width:82px}.coin-adjust input[name=note]{width:118px}@media(max-width:760px){.top{align-items:flex-start;flex-direction:column}.grid{grid-template-columns:1fr}.review-item{grid-template-columns:1fr}.review-actions{justify-self:start}}
 </style>'''
 
 
@@ -31,6 +31,7 @@ def admin_nav(active=""):
     <a class="btn secondary" href="/manage/tools/">工具管理</a>
     <a class="btn {'secondary' if active!='users' else ''}" href="/manage/community/users">用户管理</a>
     <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
+    <a class="btn {'secondary' if active!='coins' else ''}" href="/manage/community/coins">币值管理</a>
     <a class="btn secondary" href="/manage/courses/">课程管理</a>
     </div>'''
 
@@ -109,6 +110,52 @@ def users_page(request: Request):
     <div class="card"><h2>新增小飞侠</h2><form action="/manage/community/users" method="post"><div class="field"><label>姓名</label><input name="name" required></div><button class="btn">添加</button></form></div></div>
     <div class="card table-wrap"><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>邮箱</th><th>状态</th><th>操作</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="5">暂无用户</td></tr>'}</tbody></table></div></div>'''
     return HTMLResponse(page(body, '用户管理 · 小飞侠设计100%'))
+
+
+@app.get('/coins', response_class=HTMLResponse)
+def coins_page(request: Request):
+    require_admin(request)
+    core.init_db(); coin_core.init_db()
+    with site.db() as conn:
+        users=conn.execute("SELECT * FROM community_users WHERE active=1 ORDER BY CASE role WHEN 'xiaofeixia' THEN 0 ELSE 1 END, display_name COLLATE NOCASE").fetchall()
+        rows=[]; totals={coin_core.FEIXIA:0, coin_core.YOUXIA:0}
+        for u in users:
+            cur=coin_core.currency_for_role(u['role'])
+            bal=coin_core.balance(conn,u['id'],cur)
+            totals[cur]+=bal
+            rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td>
+            <td>{core.role_label(u['role'])}</td><td><b>{bal}</b> {coin_core.label(cur)}</td>
+            <td><form class="coin-adjust" action="/manage/community/coins/{u['id']}/adjust" method="post">
+            <input name="delta" type="number" step="1" placeholder="+10 / -5" required>
+            <input name="note" placeholder="备注（可选）">
+            <button class="btn secondary mini">调整</button></form></td></tr>''')
+        recent=conn.execute("SELECT l.*,u.display_name FROM coin_ledger l JOIN community_users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 30").fetchall()
+    led=''.join(f'''<tr><td>{site.esc(r['display_name'])}</td><td>{site.esc(coin_core.REASON_LABELS.get(r['reason'],r['reason']))}</td>
+    <td>{site.esc(r['note'] or '—')}</td><td>{'+' if int(r['delta'])>0 else ''}{int(r['delta'])} {coin_core.label(r['currency'])}</td>
+    <td class="muted">{site.esc((r['created_at'] or '')[:16].replace('T',' '))}</td></tr>''' for r in recent) or '<tr><td colspan="5">暂无流水</td></tr>'
+    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>币值管理</h1><div class="muted">小飞侠靠发布工具赚取飞侠币；小游侠没有赚取途径，需要在这里充值游侠币。正数为充值，负数为扣减。</div></div>{admin_nav('coins')}</div>
+    <div class="summary"><div class="stat"><b>{totals[coin_core.FEIXIA]}</b><span>流通中飞侠币</span></div><div class="stat"><b>{totals[coin_core.YOUXIA]}</b><span>流通中游侠币</span></div></div>
+    <div class="card table-wrap"><h2>用户余额</h2><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>余额</th><th>充值 / 扣减</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="4">暂无用户</td></tr>'}</tbody></table></div>
+    <div class="card table-wrap"><h2>最近流水</h2><table class="table"><thead><tr><th>用户</th><th>类型</th><th>说明</th><th>变动</th><th>时间</th></tr></thead><tbody>{led}</tbody></table></div></div>'''
+    return HTMLResponse(page(body, '币值管理 · 小飞侠设计100%'))
+
+
+@app.post('/coins/{user_id}/adjust')
+def adjust_coins(request: Request, user_id: int, delta: int = Form(...), note: str = Form("")):
+    require_admin(request)
+    coin_core.init_db()
+    if delta == 0:
+        raise HTTPException(400, "调整数量不能为 0。")
+    if abs(delta) > 100000:
+        raise HTTPException(400, "单次调整不能超过 100000。")
+    with site.db() as conn:
+        u=conn.execute("SELECT * FROM community_users WHERE id=?", (user_id,)).fetchone()
+        if not u: raise HTTPException(404, "用户不存在。")
+        currency=coin_core.currency_for_role(u['role'])
+        if delta < 0 and coin_core.balance(conn,user_id,currency) + delta < 0:
+            raise HTTPException(409, "扣减后余额会变成负数。")
+        coin_core.adjust(conn, user_id, currency, delta, note.strip()[:120] or "管理员调整")
+    return RedirectResponse('/manage/community/coins', 303)
 
 
 @app.get('/invites', response_class=HTMLResponse)
@@ -228,8 +275,11 @@ def approve(request: Request, submission_id: int):
         else:
             raise HTTPException(400, "投稿类型无效。")
 
-        sub_coin=int((s['coin_price'] if 'coin_price' in s.keys() else 0) or 0)
-        conn.execute("UPDATE tools SET coin_price=? WHERE id=?", (sub_coin,tool_id))
+        keys=s.keys()
+        sub_feixia=int((s['feixia_coin_price'] if 'feixia_coin_price' in keys else 0) or 0)
+        sub_youxia=int((s['youxia_coin_price'] if 'youxia_coin_price' in keys else 0) or 0)
+        conn.execute("UPDATE tools SET feixia_coin_price=?,youxia_coin_price=? WHERE id=?",
+                     (sub_feixia,sub_youxia,tool_id))
         coin_core.grant_publish_reward(conn, s['user_id'], submission_id, tool_id, note=s['name'] or s['slug'])
 
         if is_web:
