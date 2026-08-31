@@ -26,6 +26,7 @@ import coin_core  # noqa: E402
 import community_admin  # noqa: E402
 import course_admin  # noqa: E402
 import course_portal  # noqa: E402
+import developer_verification_portal  # noqa: E402
 import homepage_portal  # noqa: E402
 import toolboard_portal  # noqa: E402
 
@@ -36,6 +37,7 @@ bbs_portal.init_db()
 bounty_portal.init_db()
 course_portal.init_db()
 coin_core.init_db()
+developer_verification_portal.init_db()
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
@@ -67,6 +69,18 @@ SESSION_UI = r'''
         if (register) register.remove();
         if (developer && state.role !== 'xiaofeixia') developer.remove();
       });
+
+      if (location.pathname === '/account/me' && state.role !== 'xiaofeixia') {
+        const card = document.querySelector('.community-card');
+        if (card && !document.getElementById('developer-verification-entry')) {
+          const box = document.createElement('div');
+          box.id = 'developer-verification-entry';
+          box.className = 'notice';
+          box.style.marginTop = '16px';
+          box.innerHTML = '<b>想发布软件？</b> 申请小飞侠开发者认证，审核通过后即可发布和维护工具。 <a href="/account/developer-verification">申请认证 →</a>';
+          card.appendChild(box);
+        }
+      }
     } catch (_) {}
   }
 
@@ -140,6 +154,7 @@ def account_session(request: Request):
 
 app.include_router(community_portal.router, prefix="/account")
 app.include_router(community_portal.developer_router, prefix="/developer")
+developer_verification_portal.install_account_routes(app, community_portal)
 app.include_router(bbs_portal.router)
 app.include_router(bounty_portal.router)
 app.include_router(course_portal.router)
@@ -157,6 +172,7 @@ def branded_admin_page(body, title=f"{BRAND_NAME} · 管理后台"):
 
 
 admin_portal.admin_page = branded_admin_page
+developer_verification_portal.install_admin_routes(admin_portal.app, admin_portal)
 admin_portal.app.mount("/community", community_admin.app)
 admin_portal.app.mount("/courses", course_admin.app)
 app.mount("/manage", admin_portal.app)
