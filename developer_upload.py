@@ -45,7 +45,6 @@ def install_streaming_submit(router):
         icon_text: str = Form("100"),
         price_yuan: float = Form(0),
         feixia_coin_price: int = Form(0),
-        youxia_coin_price: int = Form(0),
         version: str = Form(...),
         notes: str = Form(""),
         app_url: str = Form(""),
@@ -61,12 +60,11 @@ def install_streaming_submit(router):
         clean_version = version.strip()
         if not clean_version:
             raise HTTPException(status_code=400, detail="版本号不能为空。")
-        for value in (feixia_coin_price, youxia_coin_price):
-            if value < 0 or value > coin_core.MAX_PRICE:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"币值价格需在 0—{coin_core.MAX_PRICE} 之间。",
-                )
+        if feixia_coin_price < 0 or feixia_coin_price > coin_core.MAX_PRICE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{coin_core.COIN_NAME}价格需在 0—{coin_core.MAX_PRICE} 之间。",
+            )
 
         is_web_app = submission_type == "new_web_app"
 
@@ -99,11 +97,7 @@ def install_streaming_submit(router):
                 if not clean_url or not clean_url.startswith("http"):
                     raise HTTPException(status_code=400, detail="请填写有效的工具访问地址（以 http 开头）。")
                 platform = "Web"
-            elif youxia_coin_price <= 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="院外价格（游侠币）必须大于 0，否则小游侠无法下载。",
-                )
+
         else:
             raise HTTPException(status_code=400, detail="投稿类型无效。")
 
@@ -138,8 +132,8 @@ def install_streaming_submit(router):
                         user_id,submission_type,tool_id,slug,name,tagline,description,
                         category,platform,icon_text,price_cents,version,notes,
                         package_name,package_path,sha256,size,status,created_at,
-                        tool_type,app_url,feixia_coin_price,youxia_coin_price
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?)""",
+                        tool_type,app_url,feixia_coin_price
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)""",
                     (
                         user["id"],
                         submission_type,
@@ -162,7 +156,6 @@ def install_streaming_submit(router):
                         "web_app" if is_web_app else "desktop",
                         app_url.strip() if is_web_app else "",
                         feixia_coin_price,
-                        youxia_coin_price,
                     ),
                 )
         except Exception:

@@ -118,23 +118,22 @@ def coins_page(request: Request):
     core.init_db(); coin_core.init_db()
     with site.db() as conn:
         users=conn.execute("SELECT * FROM community_users WHERE active=1 ORDER BY CASE role WHEN 'xiaofeixia' THEN 0 ELSE 1 END, display_name COLLATE NOCASE").fetchall()
-        rows=[]; totals={coin_core.FEIXIA:0, coin_core.YOUXIA:0}
+        rows=[]; total=0
         for u in users:
-            cur=coin_core.currency_for_role(u['role'])
-            bal=coin_core.balance(conn,u['id'],cur)
-            totals[cur]+=bal
+            bal=coin_core.balance(conn,u['id'])
+            total+=bal
             rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td>
-            <td>{core.role_label(u['role'])}</td><td><b>{bal}</b> {coin_core.label(cur)}</td>
+            <td>{core.role_label(u['role'])}</td><td><b>{bal}</b> {coin_core.COIN_NAME}</td>
             <td><form class="coin-adjust" action="/manage/community/coins/{u['id']}/adjust" method="post">
             <input name="delta" type="number" step="1" placeholder="+10 / -5" required>
             <input name="note" placeholder="备注（可选）">
             <button class="btn secondary mini">调整</button></form></td></tr>''')
         recent=conn.execute("SELECT l.*,u.display_name FROM coin_ledger l JOIN community_users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 30").fetchall()
     led=''.join(f'''<tr><td>{site.esc(r['display_name'])}</td><td>{site.esc(coin_core.REASON_LABELS.get(r['reason'],r['reason']))}</td>
-    <td>{site.esc(r['note'] or '—')}</td><td>{'+' if int(r['delta'])>0 else ''}{int(r['delta'])} {coin_core.label(r['currency'])}</td>
+    <td>{site.esc(r['note'] or '—')}</td><td>{'+' if int(r['delta'])>0 else ''}{int(r['delta'])}</td>
     <td class="muted">{site.esc((r['created_at'] or '')[:16].replace('T',' '))}</td></tr>''' for r in recent) or '<tr><td colspan="5">暂无流水</td></tr>'
-    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>币值管理</h1><div class="muted">小飞侠靠发布工具赚取飞侠币；小游侠没有赚取途径，需要在这里充值游侠币。正数为充值，负数为扣减。</div></div>{admin_nav('coins')}</div>
-    <div class="summary"><div class="stat"><b>{totals[coin_core.FEIXIA]}</b><span>流通中飞侠币</span></div><div class="stat"><b>{totals[coin_core.YOUXIA]}</b><span>流通中游侠币</span></div></div>
+    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>币值管理</h1><div class="muted">注册赠送 {coin_core.REGISTER_BONUS} 个，发布工具审核通过再得 {coin_core.PUBLISH_REWARD} 个。这里可人工充值或扣减：正数为充值，负数为扣减。</div></div>{admin_nav('coins')}</div>
+    <div class="summary"><div class="stat"><b>{total}</b><span>流通中{coin_core.COIN_NAME}</span></div><div class="stat"><b>{len(rows)}</b><span>启用账号</span></div></div>
     <div class="card table-wrap"><h2>用户余额</h2><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>余额</th><th>充值 / 扣减</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="4">暂无用户</td></tr>'}</tbody></table></div>
     <div class="card table-wrap"><h2>最近流水</h2><table class="table"><thead><tr><th>用户</th><th>类型</th><th>说明</th><th>变动</th><th>时间</th></tr></thead><tbody>{led}</tbody></table></div></div>'''
     return HTMLResponse(page(body, '币值管理 · 小飞侠设计100%'))
@@ -151,10 +150,9 @@ def adjust_coins(request: Request, user_id: int, delta: int = Form(...), note: s
     with site.db() as conn:
         u=conn.execute("SELECT * FROM community_users WHERE id=?", (user_id,)).fetchone()
         if not u: raise HTTPException(404, "用户不存在。")
-        currency=coin_core.currency_for_role(u['role'])
-        if delta < 0 and coin_core.balance(conn,user_id,currency) + delta < 0:
+        if delta < 0 and coin_core.balance(conn,user_id) + delta < 0:
             raise HTTPException(409, "扣减后余额会变成负数。")
-        coin_core.adjust(conn, user_id, currency, delta, note.strip()[:120] or "管理员调整")
+        coin_core.adjust(conn, user_id, delta, note.strip()[:120] or "管理员调整")
     return RedirectResponse('/manage/community/coins', 303)
 
 
@@ -275,11 +273,8 @@ def approve(request: Request, submission_id: int):
         else:
             raise HTTPException(400, "投稿类型无效。")
 
-        keys=s.keys()
-        sub_feixia=int((s['feixia_coin_price'] if 'feixia_coin_price' in keys else 0) or 0)
-        sub_youxia=int((s['youxia_coin_price'] if 'youxia_coin_price' in keys else 0) or 0)
-        conn.execute("UPDATE tools SET feixia_coin_price=?,youxia_coin_price=? WHERE id=?",
-                     (sub_feixia,sub_youxia,tool_id))
+        sub_price=int((s['feixia_coin_price'] if 'feixia_coin_price' in s.keys() else 0) or 0)
+        conn.execute("UPDATE tools SET feixia_coin_price=? WHERE id=?",(sub_price,tool_id))
         coin_core.grant_publish_reward(conn, s['user_id'], submission_id, tool_id, note=s['name'] or s['slug'])
 
         if is_web:

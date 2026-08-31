@@ -66,26 +66,34 @@ def init_db():
 
 
 def _migrate_to_coins(conn):
-    """Restate 悬赏 in coins. Bounties predating escrow are marked unescrowed
-    so cancelling one cannot refund credits that were never held."""
+    """Restate 悬赏 in 飞侠币.
+
+    Bounties predating escrow are marked unescrowed so cancelling one cannot
+    refund credits that were never held. The short-lived per-bounty currency
+    column goes: every reward is now denominated in 飞侠币.
+    """
     cols = {r['name'] for r in conn.execute("PRAGMA table_info(bounties)").fetchall()}
     if 'reward' not in cols:
         conn.execute("ALTER TABLE bounties ADD COLUMN reward INTEGER NOT NULL DEFAULT 0")
-        conn.execute(f"ALTER TABLE bounties ADD COLUMN currency TEXT NOT NULL DEFAULT '{coin_core.YOUXIA}'")
         conn.execute("ALTER TABLE bounties ADD COLUMN escrowed INTEGER NOT NULL DEFAULT 0")
         if 'budget_cents' in cols:
-            # ¥1 = 1 coin, matching the tool store conversion.
-            conn.execute("UPDATE bounties SET reward=MAX(CAST(budget_cents/100 AS INTEGER),0)")
-        conn.execute(
-            "UPDATE bounties SET currency=(SELECT CASE WHEN u.role='xiaofeixia' THEN ? ELSE ? END "
-            "FROM community_users u WHERE u.id=bounties.user_id)",
-            (coin_core.FEIXIA, coin_core.YOUXIA),
-        )
+            # ¥1 = 1 游侠币 = 0.5 飞侠币, matching the tool store conversion.
+            conn.execute(
+                "UPDATE bounties SET reward=(MAX(CAST(budget_cents/100 AS INTEGER),0)+1)/2"
+            )
+        cols.add('reward')
+    if 'currency' in cols:
+        # 院外 rewards were quoted in 游侠币; halve them onto the one currency.
+        conn.execute("UPDATE bounties SET reward=(reward+1)/2 WHERE currency<>'feixia'")
+        conn.execute("ALTER TABLE bounties DROP COLUMN currency")
+
     rcols = {r['name'] for r in conn.execute("PRAGMA table_info(bounty_responses)").fetchall()}
     if 'quote_coins' not in rcols:
         conn.execute("ALTER TABLE bounty_responses ADD COLUMN quote_coins INTEGER NOT NULL DEFAULT 0")
         if 'quote_cents' in rcols:
-            conn.execute("UPDATE bounty_responses SET quote_coins=MAX(CAST(quote_cents/100 AS INTEGER),0)")
+            conn.execute(
+                "UPDATE bounty_responses SET quote_coins=(MAX(CAST(quote_cents/100 AS INTEGER),0)+1)/2"
+            )
 
 
 def user(request):
@@ -101,8 +109,8 @@ def badge(status):
 
 
 def money(row):
-    """Render a bounty's reward in its own currency."""
-    return f"{int(row['reward'] or 0):,} {coin_core.label(row['currency'])}"
+    """Render a bounty's reward."""
+    return f"{int(row['reward'] or 0):,} {coin_core.COIN_NAME}"
 
 
 def safe_url(value):
@@ -144,9 +152,9 @@ def new_bounty(request: Request):
     u=user(request)
     if not u: return login_redirect('/bounties/new')
     init_db()
-    currency=coin_core.currency_for_role(u['role']); cur_name=coin_core.label(currency)
+    cur_name=coin_core.COIN_NAME
     with site.db() as conn:
-        bal=coin_core.balance(conn,u['id'],currency)
+        bal=coin_core.balance(conn,u['id'])
     cats=''.join(f'<option value="{site.esc(c)}">{site.esc(c)}</option>' for c in core.TOOL_CATEGORIES)
     dels=''.join(f'<option value="{site.esc(d)}">{site.esc(d)}</option>' for d in DELIVERABLES)
     body=f'''<div class="bw"><div class="bh"><div><div class="ey">NEW BOUNTY</div><h1>发布需求</h1><div class="lead">描述真实工作中的问题，设置悬赏金额，让合适的小飞侠来解决。</div></div><a class="btn secondary" href="/bounties">返回需求广场</a></div><div class="panel"><div class="note">发布时悬赏会从你的余额中<b>冻结</b>，当前余额 {bal} {cur_name}。选中开发者并标记完成后，赏金转给该开发者；取消需求则全额退回。</div><form action="/bounties/new" method="post"><div class="field"><label>需求名称</label><input name="title" maxlength="120" required></div><div class="formgrid"><div class="field"><label>分类</label><select name="category">{cats}</select></div><div class="field"><label>期望交付</label><select name="deliverable">{dels}</select></div><div class="field"><label>悬赏金额（{cur_name}）</label><input name="reward" type="number" min="1" max="{coin_core.MAX_PRICE}" step="1" required></div><div class="field"><label>截止日期（可选）</label><input name="deadline" type="date"></div></div><div class="field"><label>需求说明</label><textarea name="description" rows="10" maxlength="10000" required></textarea></div><div class="field"><label>参考链接（可选）</label><input name="reference_url" placeholder="https://..."></div><button class="btn">发布悬赏</button></form></div></div>'''
@@ -162,14 +170,13 @@ def create_bounty(request: Request,title: str=Form(...),category: str=Form('其�
     if not description or len(description)>10000: raise HTTPException(400,'需求说明不能为空，且最多 10000 字。')
     if category not in core.TOOL_CATEGORIES: raise HTTPException(400,'请选择有效分类。')
     if deliverable not in DELIVERABLES: raise HTTPException(400,'请选择有效交付形式。')
-    currency=coin_core.currency_for_role(u['role'])
     if reward<1 or reward>coin_core.MAX_PRICE:
-        raise HTTPException(400,f'悬赏金额需在 1—{coin_core.MAX_PRICE} {coin_core.label(currency)}之间。')
+        raise HTTPException(400,f'悬赏金额需在 1—{coin_core.MAX_PRICE} {coin_core.COIN_NAME}之间。')
     stamp=core.now()
     with site.db() as conn:
-        cur=conn.execute('''INSERT INTO bounties(user_id,title,category,description,deliverable,reference_url,reward,currency,escrowed,deadline,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,'open',?,?)''',(u['id'],title,category,description,deliverable,safe_url(reference_url),reward,currency,deadline.strip()[:10],stamp,stamp)); bid=cur.lastrowid
+        cur=conn.execute('''INSERT INTO bounties(user_id,title,category,description,deliverable,reference_url,reward,escrowed,deadline,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,1,?,'open',?,?)''',(u['id'],title,category,description,deliverable,safe_url(reference_url),reward,deadline.strip()[:10],stamp,stamp)); bid=cur.lastrowid
         # Freeze the reward now so an open bounty is always backed by credits.
-        coin_core.spend(conn,u['id'],currency,reward,'bounty_escrow',ref=f'{bid}:{stamp}',note=title)
+        coin_core.spend(conn,u['id'],reward,'bounty_escrow',ref=f'{bid}:{stamp}',note=title)
     return RedirectResponse(f'/bounties/{bid}',303)
 
 
@@ -203,13 +210,13 @@ def detail(request: Request,bounty_id: int):
         if not r: continue
         action=f'<form action="/bounties/{bounty_id}/accept/{r["id"]}" method="post"><button class="btn">选中该开发者</button></form>' if owner and b['status']=='open' and r['status']!='accepted' else ''
         state='已选中' if r['status']=='accepted' else '已提交'
-        items.append(f'<div class="response"><div class="head"><div><b>{site.esc(r["display_name"])}</b><div class="meta">预计 {int(r["estimated_days"])} 天 · 报价 {str(int(r["quote_coins"] or 0))+" "+coin_core.label(b["currency"]) if int(r["quote_coins"] or 0)>0 else "按悬赏金额"} · {state}</div></div>{action}</div><div class="body">{site.esc(r["proposal"])}</div></div>')
+        items.append(f'<div class="response"><div class="head"><div><b>{site.esc(r["display_name"])}</b><div class="meta">预计 {int(r["estimated_days"])} 天 · 报价 {str(int(r["quote_coins"] or 0))+" "+coin_core.COIN_NAME if int(r["quote_coins"] or 0)>0 else "按悬赏金额"} · {state}</div></div>{action}</div><div class="body">{site.esc(r["proposal"])}</div></div>')
     response=''
     if owner: response=f'<div class="panel"><h2>开发者方案 <span class="meta">{len(rs)} 个响应</span></h2>{"".join(items) if items else "<div class=empty>暂时还没有开发者提交方案。</div>"}</div>'
     elif own: response=f'<div class="panel"><h2>我的方案</h2>{"".join(items)}</div>'
-    elif can: response=f'''<div class="panel"><h2>提交解决方案</h2><form action="/bounties/{bounty_id}/respond" method="post"><div class="field"><label>方案说明</label><textarea name="proposal" rows="7" maxlength="5000" required></textarea></div><div class="formgrid"><div class="field"><label>预计完成周期（天）</label><input name="estimated_days" type="number" min="1" max="365" value="7" required></div><div class="field"><label>报价（{coin_core.label(b['currency'])}，可选）</label><input name="quote_coins" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="0"></div></div><button class="btn">提交方案</button></form></div>'''
+    elif can: response=f'''<div class="panel"><h2>提交解决方案</h2><form action="/bounties/{bounty_id}/respond" method="post"><div class="field"><label>方案说明</label><textarea name="proposal" rows="7" maxlength="5000" required></textarea></div><div class="formgrid"><div class="field"><label>预计完成周期（天）</label><input name="estimated_days" type="number" min="1" max="365" value="7" required></div><div class="field"><label>报价（{coin_core.COIN_NAME}，可选）</label><input name="quote_coins" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="0"></div></div><button class="btn">提交方案</button></form></div>'''
     elif not u and b['status']=='open': response=f'<div class="panel"><h2>想解决这个需求？</h2><a class="btn" href="/account/login?next=/bounties/{bounty_id}">登录小飞侠账号</a></div>'
-    cur_name=coin_core.label(b['currency'])
+    cur_name=coin_core.COIN_NAME
     if int(b['escrowed'] or 0):
         escrow_note=f'该悬赏的 {int(b["reward"] or 0)} {cur_name} 已从发布者余额中冻结。标记完成后转给被选中的开发者；取消需求则全额退回发布者。'
     elif b['status']=='completed':
@@ -281,21 +288,21 @@ def set_status(request: Request,bounty_id: int,status: str=Form(...)):
 
         # The status guards above are the idempotency barrier: each transition
         # is only reachable once, so each ledger move happens once.
-        reward=int(b['reward'] or 0); currency=b['currency']; escrowed=int(b['escrowed'] or 0)
+        reward=int(b['reward'] or 0); escrowed=int(b['escrowed'] or 0)
         held=escrowed
         if status=='completed':
             dev=conn.execute('SELECT developer_user_id FROM bounty_responses WHERE id=? AND bounty_id=?',(b['accepted_response_id'],bounty_id)).fetchone()
             if not dev: raise HTTPException(409,'找不到被选中的开发者。')
             if escrowed:
-                coin_core.credit(conn,dev['developer_user_id'],currency,reward,'bounty_payout',ref=f'{bounty_id}:{stamp}',note=b['title'])
+                coin_core.credit(conn,dev['developer_user_id'],reward,'bounty_payout',ref=f'{bounty_id}:{stamp}',note=b['title'])
                 held=0
         elif status=='cancelled':
             if escrowed:
-                coin_core.credit(conn,b['user_id'],currency,reward,'bounty_refund',ref=f'{bounty_id}:{stamp}',note=b['title'])
+                coin_core.credit(conn,b['user_id'],reward,'bounty_refund',ref=f'{bounty_id}:{stamp}',note=b['title'])
                 held=0
         elif status=='open' and not escrowed:
             # Re-opening puts the reward back on the hook.
-            coin_core.spend(conn,b['user_id'],currency,reward,'bounty_escrow',ref=f'{bounty_id}:{stamp}',note=b['title'])
+            coin_core.spend(conn,b['user_id'],reward,'bounty_escrow',ref=f'{bounty_id}:{stamp}',note=b['title'])
             held=1
 
         accepted=None if status=='open' else b['accepted_response_id']; conn.execute('UPDATE bounties SET status=?,accepted_response_id=?,escrowed=?,updated_at=? WHERE id=?',(status,accepted,held,stamp,bounty_id))

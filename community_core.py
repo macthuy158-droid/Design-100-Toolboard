@@ -268,22 +268,16 @@ def can_download(conn, user, tool):
         return False
     if coin_core.is_owner(tool, user['id']):
         return True
-
-    if user['role'] == ROLE_XIAOFEIXIA:
-        # Free to 院内 accounts unless the developer set a 飞侠币 price.
-        if coin_core.coin_price(tool, coin_core.FEIXIA) <= 0:
-            return True
-        return coin_core.has_access(conn, user['id'], tool['id'], coin_core.FEIXIA)
-
-    # 小游侠 now unlock with 游侠币. Entitlements bought back when the store
-    # charged 人民币 are still honoured.
-    if conn.execute(
+    if coin_core.coin_price(tool) <= 0:
+        return True
+    if coin_core.has_access(conn, user['id'], tool['id']):
+        return True
+    # Entitlements bought back when the store charged 人民币 are still honoured.
+    return bool(conn.execute(
         "SELECT e.id FROM entitlements e JOIN orders o ON o.id=e.order_id "
         "WHERE e.user_id=? AND e.tool_id=? AND o.status='paid' AND o.amount_cents>0 LIMIT 1",
         (user['id'], tool['id']),
-    ).fetchone():
-        return True
-    return coin_core.has_access(conn, user['id'], tool['id'], coin_core.YOUXIA)
+    ).fetchone())
 
 
 def generate_invite_code(real_name: str):
