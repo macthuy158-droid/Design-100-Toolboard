@@ -20,6 +20,7 @@ import developer_upload  # noqa: E402
 community_core.init_db = once_per_process(community_core.init_db)
 community_core.init_db()
 
+import bbs_portal  # noqa: E402
 import bounty_portal  # noqa: E402
 import coin_core  # noqa: E402
 import community_admin  # noqa: E402
@@ -28,9 +29,10 @@ import course_portal  # noqa: E402
 import homepage_portal  # noqa: E402
 import toolboard_portal  # noqa: E402
 
-# Bounty, course and coin schemas are deliberately isolated from the existing
-# tool/community migrations so the new features can evolve without
-# destabilising Tool Store.
+# Community, bounty, course and coin schemas are deliberately isolated from
+# the existing tool migrations so features can evolve without destabilising
+# Tool Store.
+bbs_portal.init_db()
 bounty_portal.init_db()
 course_portal.init_db()
 coin_core.init_db()
@@ -59,7 +61,7 @@ SESSION_UI = r'''
 
         if (login) {
           login.href = '/account/me';
-          login.textContent = `${state.display_name} · ${state.role_label}`;
+          login.textContent = state.display_name;
           login.title = '进入个人中心';
         }
         if (register) register.remove();
@@ -84,6 +86,7 @@ def brand_text(value: str) -> str:
         .replace("深圳院设计100%", BRAND_NAME)
         .replace("深圳设计100%", BRAND_NAME)
         .replace("100% 工具开发板", BRAND_NAME)
+        .replace("小游侠", "社区成员")
     )
 
 
@@ -94,7 +97,7 @@ _original_nav = public_site.nav
 def branded_nav():
     html = brand_text(_original_nav())
     old = '<div class="navlinks"><a href="/#tools">工具</a><a href="/#about">关于</a><a class="admin-link" href="/manage">管理</a></div>'
-    new = '''<div class="navlinks"><a href="/tools">工具</a><a href="/courses">课程</a><a href="/bounties">需求</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
+    new = '''<div class="navlinks"><a href="/tools">工具</a><a href="/bbs">BBS</a><a href="/courses">课程</a><a href="/account/register">注册</a><a class="admin-link" href="/account/login">登录</a></div>'''
     return html.replace(old, new)
 
 
@@ -131,12 +134,13 @@ def account_session(request: Request):
         "authenticated": True,
         "display_name": user["display_name"],
         "role": user["role"],
-        "role_label": community_core.role_label(user["role"]),
+        "role_label": "小飞侠" if user["role"] == "xiaofeixia" else "",
     }
 
 
 app.include_router(community_portal.router, prefix="/account")
 app.include_router(community_portal.developer_router, prefix="/developer")
+app.include_router(bbs_portal.router)
 app.include_router(bounty_portal.router)
 app.include_router(course_portal.router)
 app.include_router(toolboard_portal.router)
