@@ -24,12 +24,16 @@ HOME_CSS = r'''<style>
 .home-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding:16px 0 15px}
 .home-section-head h2{font-size:28px;letter-spacing:-.035em;margin:0 0 5px}
 .home-section-head p{font-size:12px;color:#8b8d92;margin:0}
-.home-bbs-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.home-bbs-card{background:#fff;border:1px solid var(--line);border-radius:25px;padding:24px;min-height:190px;display:flex;flex-direction:column;transition:.18s}
-.home-bbs-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-.home-bbs-icon{font-size:24px}.home-bbs-card h3{font-size:20px;letter-spacing:-.035em;margin:18px 0 7px}.home-bbs-card p{font-size:11px;line-height:1.75;color:#777;margin:0;max-width:300px}.home-bbs-go{font-size:11px;margin-top:auto;padding-top:18px;font-weight:700}.home-bbs-card.dark{background:#111;color:#fff;border-color:#111}.home-bbs-card.dark p{color:#aaa}.home-bbs-card.dark .home-bbs-go{color:#fff}
-@media(max-width:950px){.home-hero-grid{grid-template-columns:1fr;gap:36px}.hero-ranking{border-left:0;border-top:1px solid rgba(255,255,255,.13);padding:28px 0 0}.home-hero-tools{align-items:flex-start;flex-direction:column}.home-search{width:100%}.home-bbs-grid{grid-template-columns:1fr}}
-@media(max-width:680px){.home-hero-card{padding:38px 26px 30px}.home-hero-grid{min-height:0}.home-section-head{align-items:flex-start;flex-direction:column}}
+.home-bbs-grid{display:flex;flex-direction:column;gap:9px}
+.home-bbs-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 22px 16px 24px;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:16px;color:#111;transition:.16s;overflow:hidden}
+.home-bbs-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.home-bbs-card:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 3%,#fff)}
+.home-bbs-icon{font-size:19px;line-height:1}
+.home-bbs-card h3{font-size:15px;letter-spacing:-.03em;margin:0 0 3px}
+.home-bbs-card p{font-size:10.5px;line-height:1.55;color:#84868b;margin:0}
+.home-bbs-go{font-size:10px;font-weight:700;color:var(--accent);white-space:nowrap}
+@media(max-width:950px){.home-hero-grid{grid-template-columns:1fr;gap:36px}.hero-ranking{border-left:0;border-top:1px solid rgba(255,255,255,.13);padding:28px 0 0}.home-hero-tools{align-items:flex-start;flex-direction:column}.home-search{width:100%}}
+@media(max-width:680px){.home-bbs-card{grid-template-columns:26px minmax(0,1fr);gap:12px;padding:14px 16px 14px 18px}.home-bbs-go{display:none}.home-hero-card{padding:38px 26px 30px}.home-hero-grid{min-height:0}.home-section-head{align-items:flex-start;flex-direction:column}}
 </style>'''
 
 
@@ -62,9 +66,9 @@ def install_homepage(app, site):
 </div></div></section>
 <section class="home-bbs"><div class="home-section-head"><div><h2>小飞侠 BBS</h2><p>技术交流、需求交易，以及设计院里真正想说的话。</p></div><a class="btn secondary" href="/bbs">进入 BBS →</a></div>
 <div class="home-bbs-grid">
-<a class="home-bbs-card" href="/bbs?board=lab"><div class="home-bbs-icon">🧪</div><h3>黑科技实验室</h3><p>AI Coding、Agent、CAD/BIM 自动化、插件脚本和各种新技术实验。</p><div class="home-bbs-go">技术交流 →</div></a>
-<a class="home-bbs-card dark" href="/bbs?board=bounty"><div class="home-bbs-icon">💰</div><h3>悬赏墙</h3><p>发布真实工具需求，设置悬赏，找到能把问题做成产品的人。</p><div class="home-bbs-go">去交易 →</div></a>
-<a class="home-bbs-card" href="/bbs?board=tree"><div class="home-bbs-icon">🌳</div><h3>设计院树洞</h3><p>聊行业、工作、AI 和设计院里的真实日常；不方便署名时，可以匿名。</p><div class="home-bbs-go">进去看看 →</div></a>
+<a class="home-bbs-card" href="/bbs?board=lab" style="--accent:#3b5bdb"><div class="home-bbs-icon">🧪</div><div><h3>黑科技实验室</h3><p>AI Coding、Agent、CAD/BIM 自动化、插件脚本和各种新技术实验。</p></div><div class="home-bbs-go">技术交流 →</div></a>
+<a class="home-bbs-card" href="/bbs?board=bounty" style="--accent:#c07800"><div class="home-bbs-icon">💰</div><div><h3>悬赏墙</h3><p>发布真实工具需求，设置悬赏，找到能把问题做成产品的人。</p></div><div class="home-bbs-go">去交易 →</div></a>
+<a class="home-bbs-card" href="/bbs?board=tree" style="--accent:#2f6f3b"><div class="home-bbs-icon">🌳</div><div><h3>设计院树洞</h3><p>聊行业、工作、AI 和设计院里的真实日常；不方便署名时，可以匿名。</p></div><div class="home-bbs-go">进去看看 →</div></a>
 </div></section>
 <footer id="about" class="footer"><span><strong>小飞侠设计100%</strong> · 设计师工具与技术社区</span><span>Designers build tools for designers.</span></footer></div>'''
         return HTMLResponse(site.page(body, extra=HOME_CSS), headers={"Cache-Control": "no-cache"})
