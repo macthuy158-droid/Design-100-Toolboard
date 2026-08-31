@@ -16,22 +16,88 @@ BOARDS = {
         "name": "黑科技实验室",
         "icon": "🧪",
         "desc": "AI Coding、Agent、CAD/BIM 自动化与各种技术实验。",
+        "accent": "#3b5bdb",
+        "unit": "帖",
     },
     "bounty": {
         "name": "悬赏墙",
         "icon": "💰",
         "desc": "把真实设计需求变成可交易、可交付的开发任务。",
+        "accent": "#c07800",
+        "unit": "个任务",
     },
     "tree": {
         "name": "设计院树洞",
         "icon": "🌳",
         "desc": "聊工作、行业、AI 和设计院里的真实日常，可匿名。",
+        "accent": "#2f6f3b",
+        "unit": "帖",
     },
 }
 
 CSS = r'''<style>
-.bbs-shell{padding:42px 0 82px}.bbs-hero{background:#0a0b0c;color:#fff;border-radius:32px;padding:38px 42px;margin-bottom:24px}.bbs-kicker{font-size:10px;letter-spacing:.15em;color:#8f9196;font-weight:800}.bbs-hero h1{font-size:44px;letter-spacing:-.05em;margin:12px 0 8px}.bbs-hero p{margin:0;color:#a9abb0;font-size:13px;line-height:1.8}.bbs-board-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}.bbs-board{background:#fff;border:1px solid var(--line);border-radius:22px;padding:20px;transition:.15s}.bbs-board:hover{transform:translateY(-2px);box-shadow:var(--shadow)}.bbs-board .ico{font-size:22px}.bbs-board h3{font-size:18px;margin:15px 0 6px;letter-spacing:-.03em}.bbs-board p{font-size:11px;line-height:1.65;color:#777;margin:0}.bbs-board.active{background:#111;color:#fff;border-color:#111}.bbs-board.active p{color:#aaa}.bbs-head{display:flex;align-items:end;justify-content:space-between;gap:18px;margin:30px 0 14px}.bbs-head h2{font-size:27px;margin:0 0 4px;letter-spacing:-.04em}.bbs-head p{font-size:11px;color:#888;margin:0}.bbs-list{background:#fff;border:1px solid var(--line);border-radius:23px;overflow:hidden}.bbs-row{display:grid;grid-template-columns:minmax(0,1fr) 140px 70px;gap:18px;align-items:center;padding:18px 20px;border-bottom:1px solid #eeeeeb}.bbs-row:last-child{border-bottom:0}.bbs-row:hover{background:#fafaf8}.bbs-title{font-size:14px;font-weight:720}.bbs-meta{font-size:10px;color:#999;margin-top:5px}.bbs-author{font-size:11px;color:#777;text-align:right}.bbs-count{font-size:10px;color:#999;text-align:right}.bbs-empty{padding:36px;text-align:center;color:#888;font-size:11px}.bbs-form,.bbs-post{background:#fff;border:1px solid var(--line);border-radius:25px;padding:28px}.bbs-form h1,.bbs-post h1{margin:0 0 20px;font-size:30px;letter-spacing:-.04em}.bbs-form label{font-size:11px;color:#777;display:block;margin:14px 0 7px}.bbs-form input[type=text],.bbs-form textarea{width:100%;border:1px solid #d8d8d5;border-radius:12px;padding:12px;background:#fff}.bbs-form textarea{min-height:180px;resize:vertical}.bbs-check{display:flex;gap:9px;align-items:center;margin:14px 0;font-size:11px;color:#666}.bbs-post-content{font-size:14px;line-height:1.9;color:#444;white-space:pre-wrap}.bbs-replies{margin-top:18px}.bbs-reply{background:#fff;border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:10px}.bbs-reply-head{font-size:10px;color:#999;margin-bottom:8px}.bbs-reply-body{font-size:13px;line-height:1.8;white-space:pre-wrap}.bbs-actions{display:flex;gap:8px;flex-wrap:wrap}.bbs-bounty-money{font-size:16px;font-weight:800;text-align:right}.bbs-bounty-status{font-size:10px;color:#999;text-align:right}.bbs-note{font-size:11px;color:#888;margin-top:10px}.bbs-form select{height:44px;border:1px solid #d8d8d5;border-radius:12px;background:#fff;padding:0 10px}.bbs-back{display:inline-block;font-size:11px;color:#777;margin-bottom:14px}
-@media(max-width:800px){.bbs-board-grid{grid-template-columns:1fr}.bbs-row{grid-template-columns:1fr auto}.bbs-author{grid-column:1;text-align:left}.bbs-count{grid-column:2;grid-row:1/3}.bbs-hero{padding:28px}.bbs-hero h1{font-size:36px}}
+.bbs-shell{padding:38px 0 82px}
+.bbs-hero{background:#0a0b0c;color:#fff;border-radius:30px;padding:34px 38px;margin-bottom:20px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:34px;align-items:center}
+.bbs-kicker{font-size:10px;letter-spacing:.15em;color:#8f9196;font-weight:800}
+.bbs-hero h1{font-size:38px;letter-spacing:-.05em;margin:10px 0 7px}
+.bbs-hero p{margin:0;color:#a9abb0;font-size:12.5px;line-height:1.75;max-width:520px}
+.bbs-stats{display:flex;gap:26px}
+.bbs-stat b{display:block;font-size:24px;letter-spacing:-.04em;line-height:1}
+.bbs-stat span{font-size:9px;color:#8f9196;letter-spacing:.05em}
+
+.bbs-board-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:26px}
+.bbs-board{position:relative;background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px 18px 15px;transition:.16s;overflow:hidden;display:flex;flex-direction:column}
+.bbs-board:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.bbs-board:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:#dadad6}
+.bbs-board-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.bbs-board .ico{font-size:20px;line-height:1}
+.bbs-board-count{font-size:9px;font-weight:750;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,#fff);border:1px solid color-mix(in srgb,var(--accent) 22%,#fff);border-radius:999px;padding:4px 8px;white-space:nowrap}
+.bbs-board h3{font-size:16px;margin:12px 0 5px;letter-spacing:-.03em}
+.bbs-board p{font-size:10.5px;line-height:1.6;color:#84868b;margin:0 0 12px}
+.bbs-board-go{margin-top:auto;font-size:10px;font-weight:700;color:var(--accent)}
+.bbs-board.active{background:#111;color:#fff;border-color:#111}
+.bbs-board.active p{color:#9a9ca0}
+.bbs-board.active .bbs-board-count{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.18);color:#fff}
+
+.bbs-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:0 0 13px}
+.bbs-head h2{font-size:23px;margin:0 0 4px;letter-spacing:-.04em}
+.bbs-head p{font-size:11px;color:#888;margin:0}
+.bbs-list{background:#fff;border:1px solid var(--line);border-radius:22px;overflow:hidden}
+.bbs-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:14px;align-items:center;padding:15px 20px;border-bottom:1px solid #f0f0ed;color:#111}
+.bbs-row:last-child{border-bottom:0}
+.bbs-row:hover{background:#fafaf8}
+.bbs-avatar{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;font-size:14px;background:#f2f2ef}
+.bbs-avatar.tag{color:#fff;font-size:11px;font-weight:800}
+.bbs-title{font-size:13.5px;font-weight:700;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bbs-meta{font-size:10px;color:#9a9ca0;margin-top:4px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.bbs-chip{border-radius:999px;padding:2px 7px;font-size:9px;font-weight:700;background:#f2f2ef;color:#6d6f73}
+.bbs-chip.accent{background:color-mix(in srgb,var(--accent) 12%,#fff);color:var(--accent)}
+.bbs-right{text-align:right;white-space:nowrap}
+.bbs-money{font-size:15px;font-weight:800;letter-spacing:-.02em}
+.bbs-count{font-size:10px;color:#9a9ca0;line-height:1.5}
+.bbs-empty{padding:44px 24px;text-align:center}
+.bbs-empty h3{margin:0 0 7px;font-size:16px;letter-spacing:-.02em}
+.bbs-empty p{margin:0 0 16px;color:#8b8d92;font-size:11.5px;line-height:1.7}
+
+.bbs-form,.bbs-post{background:#fff;border:1px solid var(--line);border-radius:24px;padding:26px}
+.bbs-form h1,.bbs-post h1{margin:0 0 18px;font-size:27px;letter-spacing:-.04em;line-height:1.25}
+.bbs-form label{font-size:11px;color:#777;display:block;margin:14px 0 7px}
+.bbs-form input[type=text],.bbs-form textarea,.bbs-form select{width:100%;border:1px solid #d8d8d5;border-radius:12px;padding:12px;background:#fff;font-size:13px}
+.bbs-form select{height:44px;padding:0 10px}
+.bbs-form textarea{min-height:180px;resize:vertical;line-height:1.7}
+.bbs-check{display:flex;gap:9px;align-items:center;margin:14px 0;font-size:11px;color:#666}
+.bbs-post-head{display:flex;gap:10px;align-items:center;font-size:10px;color:#9a9ca0;margin-bottom:12px}
+.bbs-post-content{font-size:14px;line-height:1.95;color:#3f4145;white-space:pre-wrap}
+.bbs-replies{margin-top:14px}
+.bbs-reply{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:9px}
+.bbs-reply-head{font-size:10px;color:#9a9ca0;margin-bottom:7px}
+.bbs-reply-body{font-size:13px;line-height:1.8;white-space:pre-wrap;color:#3f4145}
+.bbs-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bbs-note{font-size:11px;color:#888;margin-top:10px}
+.bbs-back{display:inline-block;font-size:11px;color:#777;margin-bottom:14px}
+.bbs-back:hover{color:#111}
+@media(max-width:880px){.bbs-board-grid{grid-template-columns:1fr}.bbs-hero{grid-template-columns:1fr;gap:22px;padding:28px 24px}.bbs-hero h1{font-size:31px}.bbs-stats{gap:22px}}
+@media(max-width:680px){.bbs-row{grid-template-columns:30px minmax(0,1fr);padding:14px 16px}.bbs-avatar{width:30px;height:30px;border-radius:9px}.bbs-right{grid-column:2;text-align:left;margin-top:6px}.bbs-head{flex-direction:column;align-items:flex-start}}
 </style>'''
 
 
@@ -80,51 +146,114 @@ def _page(body, title="小飞侠 BBS"):
     return HTMLResponse(site.page(site.nav() + f'<div class="shell bbs-shell">{body}</div>', title=title, extra=CSS), headers={"Cache-Control": "no-cache"})
 
 
+def _avatar(label, accent=None):
+    if accent:
+        return f'<div class="bbs-avatar tag" style="background:{accent}">{label}</div>'
+    return f'<div class="bbs-avatar">{label}</div>'
+
+
+def _post_row(r):
+    meta = BOARDS[r["board"]]
+    return f'''<a class="bbs-row" href="/bbs/post/{r['id']}" style="--accent:{meta['accent']}">
+{_avatar(meta['icon'])}
+<div><div class="bbs-title">{esc(r['title'])}</div>
+<div class="bbs-meta"><span class="bbs-chip accent">{meta['name']}</span><span>{_identity(r, bool(r['anonymous']))}</span><span>{esc((r['created_at'] or '')[:10])}</span></div></div>
+<div class="bbs-right"><div class="bbs-count">{int(r['reply_count'])} 回复<br>{int(r['views'])} 浏览</div></div></a>'''
+
+
+def _bounty_row(r):
+    meta = BOARDS["bounty"]
+    state = "招募中" if r["status"] == "open" else "开发中"
+    return f'''<a class="bbs-row" href="/bounties/{r['id']}" style="--accent:{meta['accent']}">
+{_avatar(meta['icon'])}
+<div><div class="bbs-title">{esc(r['title'])}</div>
+<div class="bbs-meta"><span class="bbs-chip accent">悬赏</span><span>{esc(r['category'])}</span><span>{state}</span></div></div>
+<div class="bbs-right"><div class="bbs-money">{int(r['reward'] or 0):,}</div><div class="bbs-count">{coin_core.COIN_NAME}</div></div></a>'''
+
+
+def _empty(title, text, cta):
+    return f'<div class="bbs-empty"><h3>{title}</h3><p>{text}</p>{cta}</div>'
+
+
 @router.get("/bbs", response_class=HTMLResponse)
 def bbs_home(request: Request, board: str = "all"):
     init_db()
     if board not in {"all", *BOARDS.keys()}:
         board = "all"
+
+    with site.db() as conn:
+        has_bounties = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounties'"
+        ).fetchone()
+        live_bounties = conn.execute(
+            "SELECT id,title,category,reward,status,created_at FROM bounties "
+            "WHERE status IN ('open','in_progress') "
+            "ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,id DESC LIMIT 30"
+        ).fetchall() if has_bounties else []
+
+        counts = {
+            key: conn.execute(
+                "SELECT COUNT(*) c FROM bbs_posts WHERE board=?", (key,)
+            ).fetchone()["c"]
+            for key in ("lab", "tree")
+        }
+        counts["bounty"] = len(live_bounties)
+        members = conn.execute(
+            "SELECT COUNT(*) c FROM community_users WHERE active=1"
+        ).fetchone()["c"]
+        replies = conn.execute("SELECT COUNT(*) c FROM bbs_replies").fetchone()["c"]
+
+        where = "" if board == "all" else "WHERE p.board=?"
+        params = () if board == "all" else (board,)
+        posts = conn.execute(
+            f'''SELECT p.*,u.display_name,u.role,
+                (SELECT COUNT(*) FROM bbs_replies r WHERE r.post_id=p.id) AS reply_count
+                FROM bbs_posts p JOIN community_users u ON u.id=p.user_id
+                {where} ORDER BY p.id DESC LIMIT 40''', params
+        ).fetchall() if board != "bounty" else []
+
     cards = "".join(
-        f'''<a class="bbs-board {'active' if board == key else ''}" href="/bbs?board={key}"><div class="ico">{meta['icon']}</div><h3>{meta['name']}</h3><p>{meta['desc']}</p></a>'''
+        f'''<a class="bbs-board {'active' if board == key else ''}" href="/bbs?board={key}" style="--accent:{meta['accent']}">
+<div class="bbs-board-top"><span class="ico">{meta['icon']}</span><span class="bbs-board-count">{counts[key]} {meta['unit']}</span></div>
+<h3>{meta['name']}</h3><p>{meta['desc']}</p><span class="bbs-board-go">进入 →</span></a>'''
         for key, meta in BOARDS.items()
     )
 
     if board == "bounty":
-        with site.db() as conn:
-            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounties'").fetchone()
-            rows = conn.execute(
-                "SELECT id,title,category,reward,status FROM bounties "
-                "WHERE status IN ('open','in_progress') "
-                "ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,id DESC LIMIT 30"
-            ).fetchall() if exists else []
-        listing = "".join(
-            f'''<a class="bbs-row" href="/bounties/{r['id']}"><div><div class="bbs-title">{esc(r['title'])}</div><div class="bbs-meta">{esc(r['category'])} · {'招募中' if r['status']=='open' else '开发中'}</div></div><div class="bbs-bounty-money">{int(r['reward'] or 0):,} {coin_core.COIN_NAME}</div><div class="bbs-count">查看 →</div></a>'''
-            for r in rows
-        ) or '<div class="bbs-empty">悬赏墙还没有任务。</div>'
-        actions = '<div class="bbs-actions"><a class="btn" href="/bounties/new">发布悬赏</a><a class="btn secondary" href="/bounties">全部交易</a></div>'
+        listing = "".join(_bounty_row(r) for r in live_bounties) or _empty(
+            "悬赏墙上还没有进行中的任务",
+            "把手头真实的重复劳动写成需求，设置飞侠币悬赏，让能做的人接走。",
+            '<a class="btn" href="/bounties/new">发布悬赏</a>',
+        )
+        actions = '<div class="bbs-actions"><a class="btn" href="/bounties/new">发布悬赏</a><a class="btn secondary" href="/bounties">全部需求</a></div>'
         subtitle = "有明确交付目标的需求，直接在这里交易。"
         title = BOARDS["bounty"]["name"]
+    elif board == "all":
+        # The feed used to read bbs_posts alone, so a board with live bounties
+        # but no posts rendered as an empty page.
+        feed = [(r["created_at"] or "", _post_row(r)) for r in posts]
+        feed += [(r["created_at"] or "", _bounty_row(r)) for r in live_bounties]
+        feed.sort(key=lambda item: item[0], reverse=True)
+        listing = "".join(html for _, html in feed[:40]) or _empty(
+            "社区还很安静",
+            "发第一帖，或者把你手上的重复劳动写成一个悬赏需求。",
+            '<a class="btn" href="/bbs/new?board=lab">+ 发帖</a> <a class="btn secondary" href="/bounties/new">发布悬赏</a>',
+        )
+        actions = '<div class="bbs-actions"><a class="btn" href="/bbs/new?board=lab">+ 发帖</a></div>'
+        subtitle = "技术、交易和真实行业日常，都在这里发生。"
+        title = "正在发生"
     else:
-        where = "" if board == "all" else "WHERE p.board=?"
-        params = () if board == "all" else (board,)
-        with site.db() as conn:
-            rows = conn.execute(
-                f'''SELECT p.*,u.display_name,u.role,
-                    (SELECT COUNT(*) FROM bbs_replies r WHERE r.post_id=p.id) AS reply_count
-                    FROM bbs_posts p JOIN community_users u ON u.id=p.user_id
-                    {where} ORDER BY p.id DESC LIMIT 40''', params
-            ).fetchall()
-        listing = "".join(
-            f'''<a class="bbs-row" href="/bbs/post/{r['id']}"><div><div class="bbs-title">{BOARDS[r['board']]['icon']} {esc(r['title'])}</div><div class="bbs-meta">{BOARDS[r['board']]['name']} · {esc(r['created_at'][:10])}</div></div><div class="bbs-author">{_identity(r, bool(r['anonymous']))}</div><div class="bbs-count">{int(r['reply_count'])} 回复<br>{int(r['views'])} 浏览</div></a>'''
-            for r in rows
-        ) or '<div class="bbs-empty">这里还没有帖子，发第一帖吧。</div>'
-        post_board = board if board in ("lab", "tree") else "lab"
-        actions = f'<div class="bbs-actions"><a class="btn" href="/bbs/new?board={post_board}">+ 发帖</a></div>'
-        subtitle = "技术、交易和真实行业日常，都在这里发生。" if board == "all" else BOARDS[board]["desc"]
-        title = "正在发生" if board == "all" else BOARDS[board]["name"]
+        listing = "".join(_post_row(r) for r in posts) or _empty(
+            f"{BOARDS[board]['name']}还没有帖子",
+            BOARDS[board]["desc"],
+            f'<a class="btn" href="/bbs/new?board={board}">发第一帖</a>',
+        )
+        actions = f'<div class="bbs-actions"><a class="btn" href="/bbs/new?board={board}">+ 发帖</a></div>'
+        subtitle = BOARDS[board]["desc"]
+        title = BOARDS[board]["name"]
 
-    body = f'''<section class="bbs-hero"><div class="bbs-kicker">DESIGNERS · TOOLS · COMMUNITY</div><h1>小飞侠 BBS</h1><p>不是官方论坛。这里是设计师自己讨论技术、发布悬赏和说真话的地方。</p></section>
+    body = f'''<section class="bbs-hero"><div><div class="bbs-kicker">DESIGNERS · TOOLS · COMMUNITY</div><h1>小飞侠 BBS</h1><p>不是官方论坛。这里是设计师自己讨论技术、发布悬赏和说真话的地方。</p></div>
+<div class="bbs-stats"><div class="bbs-stat"><b>{counts['lab'] + counts['tree']}</b><span>帖子</span></div><div class="bbs-stat"><b>{replies}</b><span>回复</span></div><div class="bbs-stat"><b>{counts['bounty']}</b><span>进行中悬赏</span></div><div class="bbs-stat"><b>{members}</b><span>社区成员</span></div></div></section>
 <div class="bbs-board-grid">{cards}</div>
 <div class="bbs-head"><div><h2>{title}</h2><p>{subtitle}</p></div>{actions}</div>
 <div class="bbs-list">{listing}</div>'''
@@ -186,10 +315,14 @@ def post_detail(request: Request, post_id: int):
     reply_html = "".join(
         f'''<div class="bbs-reply"><div class="bbs-reply-head">{_identity(r, bool(r['anonymous']))} · {esc(r['created_at'][:16].replace('T',' '))}</div><div class="bbs-reply-body">{esc(r['content'])}</div></div>'''
         for r in replies
-    ) or '<div class="bbs-empty">还没有回复。</div>'
+    ) or '<div class="bbs-reply" style="color:#9a9ca0;font-size:12px">还没有回复，来说两句。</div>'
     user = community_core.current_user(request)
     reply_form = '''<form class="bbs-form" method="post" action="/bbs/post/%d/reply"><label>回复</label><textarea name="content" required style="min-height:100px"></textarea>%s<div class="bbs-actions"><button class="btn" type="submit">回复</button></div></form>''' % (post_id, '<label class="bbs-check"><input type="checkbox" name="anonymous" value="1"> 匿名回复</label>' if row['board'] == 'tree' else '') if user else '<div class="bbs-note"><a href="/account/login">登录后参与回复 →</a></div>'
-    body = f'''<a class="bbs-back" href="/bbs?board={row['board']}">← {BOARDS[row['board']]['name']}</a><article class="bbs-post"><div class="bbs-meta">{BOARDS[row['board']]['icon']} {BOARDS[row['board']]['name']} · {_identity(row, bool(row['anonymous']))}</div><h1>{esc(row['title'])}</h1><div class="bbs-post-content">{esc(row['content'])}</div></article><div class="bbs-head"><div><h2>{len(replies)} 条回复</h2></div></div><div class="bbs-replies">{reply_html}</div>{reply_form}'''
+    meta = BOARDS[row['board']]
+    body = f'''<a class="bbs-back" href="/bbs?board={row['board']}">← {meta['name']}</a>
+<article class="bbs-post" style="--accent:{meta['accent']}"><div class="bbs-post-head"><span class="bbs-chip accent">{meta['icon']} {meta['name']}</span><span>{_identity(row, bool(row['anonymous']))}</span><span>{esc((row['created_at'] or '')[:16].replace('T',' '))}</span><span>{int(row['views'])} 浏览</span></div>
+<h1>{esc(row['title'])}</h1><div class="bbs-post-content">{esc(row['content'])}</div></article>
+<div class="bbs-head"><div><h2>{len(replies)} 条回复</h2></div></div><div class="bbs-replies">{reply_html}</div>{reply_form}'''
     return _page(body, f"{row['title']} · 小飞侠 BBS")
 
 
