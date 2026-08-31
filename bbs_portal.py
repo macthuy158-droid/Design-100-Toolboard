@@ -18,6 +18,7 @@ BOARDS = {
         "desc": "AI Coding、Agent、CAD/BIM 自动化与各种技术实验。",
         "accent": "#3b5bdb",
         "unit": "帖",
+        "rules": [],
     },
     "bounty": {
         "name": "悬赏墙",
@@ -25,6 +26,7 @@ BOARDS = {
         "desc": "把真实设计需求变成可交易、可交付的开发任务。",
         "accent": "#c07800",
         "unit": "个任务",
+        "rules": [],
     },
     "tree": {
         "name": "设计院树洞",
@@ -32,6 +34,11 @@ BOARDS = {
         "desc": "聊工作、行业、AI 和设计院里的真实日常，可匿名。",
         "accent": "#2f6f3b",
         "unit": "帖",
+        "rules": [
+            "可以吐槽事，不点名骂人。",
+            "不发未公开的项目信息和客户信息。",
+            "匿名是对同事的保护，不是攻击的掩护。",
+        ],
     },
 }
 
@@ -94,6 +101,12 @@ CSS = r'''<style>
 .bbs-note{font-size:11px;color:#888;margin-top:10px}
 .bbs-back{display:inline-block;font-size:11px;color:#777;margin-bottom:14px}
 .bbs-back:hover{color:#111}
+.bbs-pin{font-size:9px;font-weight:800;color:#c07800;background:#fdf6e8;border:1px solid #f0dfb8;border-radius:999px;padding:2px 7px;vertical-align:middle}
+.bbs-mini{margin-left:10px;border:1px solid #e0e0dd;background:#fff;color:#8b8d92;border-radius:8px;padding:3px 9px;font-size:10px;cursor:pointer}
+.bbs-mini:hover{border-color:#d4b3b3;color:#b42318}
+.bbs-rules{background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:14px;padding:14px 18px;margin-bottom:11px}
+.bbs-rules b{font-size:11px;color:var(--accent)}
+.bbs-rules ul{margin:7px 0 0;padding-left:17px;color:#7a7c81;font-size:11px;line-height:1.85}
 @media(max-width:880px){.bbs-hero{grid-template-columns:1fr;gap:22px;padding:28px 24px}.bbs-hero h1{font-size:31px}.bbs-stats{gap:22px}}
 @media(max-width:680px){.bbs-board{grid-template-columns:26px minmax(0,1fr) auto;gap:12px;padding:14px 16px 14px 18px}.bbs-board-go{display:none}.bbs-row{grid-template-columns:30px minmax(0,1fr);padding:14px 16px}.bbs-avatar{width:30px;height:30px;border-radius:9px}.bbs-right{grid-column:2;text-align:left;margin-top:6px}.bbs-head{flex-direction:column;align-items:flex-start}}
 </style>'''
@@ -128,9 +141,25 @@ def init_db():
             FOREIGN KEY(post_id) REFERENCES bbs_posts(id) ON DELETE CASCADE,
             FOREIGN KEY(user_id) REFERENCES community_users(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS bbs_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            post_id INTEGER NOT NULL,
+            reply_id INTEGER,
+            actor_name TEXT NOT NULL DEFAULT '',
+            seen INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES community_users(id) ON DELETE CASCADE,
+            FOREIGN KEY(post_id) REFERENCES bbs_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY(reply_id) REFERENCES bbs_replies(id) ON DELETE CASCADE
+        );
         CREATE INDEX IF NOT EXISTS idx_bbs_posts_board ON bbs_posts(board,id DESC);
         CREATE INDEX IF NOT EXISTS idx_bbs_replies_post ON bbs_replies(post_id,id ASC);
+        CREATE INDEX IF NOT EXISTS idx_bbs_notify ON bbs_notifications(user_id,seen,id DESC);
         ''')
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(bbs_posts)").fetchall()}
+        if "pinned" not in cols:
+            conn.execute("ALTER TABLE bbs_posts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
 
 
 def _identity(row, anonymous=False):
@@ -144,6 +173,19 @@ def _page(body, title="小飞侠 BBS"):
     return HTMLResponse(site.page(site.nav() + f'<div class="shell bbs-shell">{body}</div>', title=title, extra=CSS), headers={"Cache-Control": "no-cache"})
 
 
+LAST_ACTIVITY = ("COALESCE((SELECT MAX(r.created_at) FROM bbs_replies r "
+                 "WHERE r.post_id=p.id), p.created_at)")
+
+
+def unread_count(conn, user):
+    if not user:
+        return 0
+    return int(conn.execute(
+        "SELECT COUNT(*) c FROM bbs_notifications WHERE user_id=? AND seen=0",
+        (user["id"],),
+    ).fetchone()["c"])
+
+
 def _avatar(label, accent=None):
     if accent:
         return f'<div class="bbs-avatar tag" style="background:{accent}">{label}</div>'
@@ -154,7 +196,7 @@ def _post_row(r):
     meta = BOARDS[r["board"]]
     return f'''<a class="bbs-row" href="/bbs/post/{r['id']}" style="--accent:{meta['accent']}">
 {_avatar(meta['icon'])}
-<div><div class="bbs-title">{esc(r['title'])}</div>
+<div><div class="bbs-title">{'<span class="bbs-pin">置顶</span> ' if int(r['pinned'] or 0) else ''}{esc(r['title'])}</div>
 <div class="bbs-meta"><span class="bbs-chip accent">{meta['name']}</span><span>{_identity(r, bool(r['anonymous']))}</span><span>{esc((r['created_at'] or '')[:10])}</span></div></div>
 <div class="bbs-right"><div class="bbs-count">{int(r['reply_count'])} 回复<br>{int(r['views'])} 浏览</div></div></a>'''
 
@@ -203,12 +245,17 @@ def bbs_home(request: Request, board: str = "all"):
 
         where = "" if board == "all" else "WHERE p.board=?"
         params = () if board == "all" else (board,)
+        # Ordered by last reply, not creation, so a thread someone is still
+        # answering does not sink below newer but finished ones.
         posts = conn.execute(
             f'''SELECT p.*,u.display_name,u.role,
-                (SELECT COUNT(*) FROM bbs_replies r WHERE r.post_id=p.id) AS reply_count
+                (SELECT COUNT(*) FROM bbs_replies r WHERE r.post_id=p.id) AS reply_count,
+                {LAST_ACTIVITY} AS last_activity
                 FROM bbs_posts p JOIN community_users u ON u.id=p.user_id
-                {where} ORDER BY p.id DESC LIMIT 40''', params
+                {where} ORDER BY p.pinned DESC, last_activity DESC LIMIT 40''', params
         ).fetchall() if board != "bounty" else []
+        viewer = community_core.current_user(request)
+        unread = unread_count(conn, viewer)
 
     cards = "".join(
         f'''<a class="bbs-board {'active' if board == key else ''}" href="/bbs?board={key}" style="--accent:{meta['accent']}">
@@ -231,7 +278,7 @@ def bbs_home(request: Request, board: str = "all"):
     elif board == "all":
         # The feed used to read bbs_posts alone, so a board with live bounties
         # but no posts rendered as an empty page.
-        feed = [(r["created_at"] or "", _post_row(r)) for r in posts]
+        feed = [(r["last_activity"] or r["created_at"] or "", _post_row(r)) for r in posts]
         feed += [(r["created_at"] or "", _bounty_row(r)) for r in live_bounties]
         feed.sort(key=lambda item: item[0], reverse=True)
         listing = "".join(html for _, html in feed[:40]) or _empty(
@@ -252,11 +299,21 @@ def bbs_home(request: Request, board: str = "all"):
         subtitle = BOARDS[board]["desc"]
         title = BOARDS[board]["name"]
 
+    rules = BOARDS[board]["rules"] if board in BOARDS else []
+    rules_html = ""
+    if rules:
+        items = "".join(f"<li>{r}</li>" for r in rules)
+        rules_html = (f'<div class="bbs-rules" style="--accent:{BOARDS[board]["accent"]}">'
+                      f'<b>{BOARDS[board]["name"]}版规</b><ul>{items}</ul></div>')
+    inbox = (f'<a class="btn secondary" href="/bbs/notifications">收件箱 · {unread} 条新回复</a>'
+             if unread else '')
+    actions = actions.replace('<div class="bbs-actions">', f'<div class="bbs-actions">{inbox}')
+
     body = f'''<section class="bbs-hero"><div><div class="bbs-kicker">DESIGNERS · TOOLS · COMMUNITY</div><h1>小飞侠 BBS</h1><p>不是官方论坛。这里是设计师自己讨论技术、发布悬赏和说真话的地方。</p></div>
 <div class="bbs-stats"><div class="bbs-stat"><b>{counts['lab'] + counts['tree']}</b><span>帖子</span></div><div class="bbs-stat"><b>{replies}</b><span>回复</span></div><div class="bbs-stat"><b>{counts['bounty']}</b><span>进行中悬赏</span></div><div class="bbs-stat"><b>{members}</b><span>社区成员</span></div></div></section>
 <div class="bbs-board-grid">{cards}</div>
 <div class="bbs-head"><div><h2>{title}</h2><p>{subtitle}</p></div>{actions}</div>
-<div class="bbs-list">{listing}</div>'''
+{rules_html}<div class="bbs-list">{listing}</div>'''
     return _page(body)
 
 
@@ -311,17 +368,35 @@ def post_detail(request: Request, post_id: int):
         if not row:
             raise HTTPException(404, "帖子不存在。")
         conn.execute("UPDATE bbs_posts SET views=views+1 WHERE id=?", (post_id,))
+        viewer = community_core.current_user(request)
+        if viewer:
+            conn.execute(
+                "UPDATE bbs_notifications SET seen=1 WHERE user_id=? AND post_id=? AND seen=0",
+                (viewer["id"], post_id),
+            )
         replies = conn.execute("SELECT r.*,u.display_name,u.role FROM bbs_replies r JOIN community_users u ON u.id=r.user_id WHERE r.post_id=? ORDER BY r.id ASC", (post_id,)).fetchall()
-    reply_html = "".join(
-        f'''<div class="bbs-reply"><div class="bbs-reply-head">{_identity(r, bool(r['anonymous']))} · {esc(r['created_at'][:16].replace('T',' '))}</div><div class="bbs-reply-body">{esc(r['content'])}</div></div>'''
-        for r in replies
-    ) or '<div class="bbs-reply" style="color:#9a9ca0;font-size:12px">还没有回复，来说两句。</div>'
-    user = community_core.current_user(request)
+    def _reply_block(r):
+        mine = viewer and int(r["user_id"]) == int(viewer["id"])
+        drop = (f'<form action="/bbs/reply/{r["id"]}/delete" method="post" style="display:inline" '
+                f'onsubmit="return confirm(\'删除这条回复？\')"><button class="bbs-mini">删除</button></form>'
+                if mine else "")
+        return (f'<div class="bbs-reply"><div class="bbs-reply-head">{_identity(r, bool(r["anonymous"]))}'
+                f' · {esc(r["created_at"][:16].replace("T", " "))}{drop}</div>'
+                f'<div class="bbs-reply-body">{esc(r["content"])}</div></div>')
+
+    reply_html = "".join(_reply_block(r) for r in replies) or '<div class="bbs-reply" style="color:#9a9ca0;font-size:12px">还没有回复，来说两句。</div>'
+    user = viewer
     reply_form = '''<form class="bbs-form" method="post" action="/bbs/post/%d/reply"><label>回复</label><textarea name="content" required style="min-height:100px"></textarea>%s<div class="bbs-actions"><button class="btn" type="submit">回复</button></div></form>''' % (post_id, '<label class="bbs-check"><input type="checkbox" name="anonymous" value="1"> 匿名回复</label>' if row['board'] == 'tree' else '') if user else '<div class="bbs-note"><a href="/account/login">登录后参与回复 →</a></div>'
     meta = BOARDS[row['board']]
+    own_actions = ""
+    if viewer and int(row["user_id"]) == int(viewer["id"]):
+        own_actions = (f'<div class="bbs-actions" style="margin-top:20px">'
+                       f'<form action="/bbs/post/{post_id}/delete" method="post" '
+                       f'onsubmit="return confirm(\'删除这一帖及其全部回复？\')">'
+                       f'<button class="bbs-mini">删除我的帖子</button></form></div>')
     body = f'''<a class="bbs-back" href="/bbs?board={row['board']}">← {meta['name']}</a>
 <article class="bbs-post" style="--accent:{meta['accent']}"><div class="bbs-post-head"><span class="bbs-chip accent">{meta['icon']} {meta['name']}</span><span>{_identity(row, bool(row['anonymous']))}</span><span>{esc((row['created_at'] or '')[:16].replace('T',' '))}</span><span>{int(row['views'])} 浏览</span></div>
-<h1>{esc(row['title'])}</h1><div class="bbs-post-content">{esc(row['content'])}</div></article>
+<h1>{'<span class="bbs-pin">置顶</span> ' if int(row['pinned'] or 0) else ''}{esc(row['title'])}</h1><div class="bbs-post-content">{esc(row['content'])}</div>{own_actions}</article>
 <div class="bbs-head"><div><h2>{len(replies)} 条回复</h2></div></div><div class="bbs-replies">{reply_html}</div>{reply_form}'''
     return _page(body, f"{row['title']} · 小飞侠 BBS")
 
@@ -337,9 +412,80 @@ def reply_post(request: Request, post_id: int, content: str = Form(...), anonymo
     if len(content) > MAX_CONTENT:
         raise HTTPException(400, f"回复最多 {MAX_CONTENT} 字，当前 {len(content)} 字。")
     with site.db() as conn:
-        post = conn.execute("SELECT board FROM bbs_posts WHERE id=?", (post_id,)).fetchone()
+        post = conn.execute("SELECT board,user_id FROM bbs_posts WHERE id=?", (post_id,)).fetchone()
         if not post:
             raise HTTPException(404, "帖子不存在。")
         is_anon = 1 if post["board"] == "tree" and anonymous == "1" else 0
-        conn.execute("INSERT INTO bbs_replies(post_id,user_id,content,anonymous,created_at) VALUES(?,?,?,?,?)", (post_id, user["id"], content, is_anon, community_core.now()))
+        stamp = community_core.now()
+        cur = conn.execute("INSERT INTO bbs_replies(post_id,user_id,content,anonymous,created_at) VALUES(?,?,?,?,?)", (post_id, user["id"], content, is_anon, stamp))
+        # Tell the author someone answered — the single thing that brings people
+        # back. Replying to your own thread notifies nobody.
+        if int(post["user_id"]) != int(user["id"]):
+            conn.execute(
+                "INSERT INTO bbs_notifications(user_id,post_id,reply_id,actor_name,created_at) "
+                "VALUES(?,?,?,?,?)",
+                (post["user_id"], post_id, cur.lastrowid,
+                 "匿名设计师" if is_anon else user["display_name"], stamp),
+            )
     return RedirectResponse(f"/bbs/post/{post_id}", status_code=303)
+
+
+@router.get("/bbs/notifications", response_class=HTMLResponse)
+def notifications(request: Request):
+    init_db()
+    user = community_core.current_user(request)
+    if not user:
+        return RedirectResponse("/account/login?next=/bbs/notifications", status_code=303)
+    with site.db() as conn:
+        rows = conn.execute(
+            '''SELECT n.*,p.title,p.board,r.content FROM bbs_notifications n
+               JOIN bbs_posts p ON p.id=n.post_id
+               LEFT JOIN bbs_replies r ON r.id=n.reply_id
+               WHERE n.user_id=? ORDER BY n.id DESC LIMIT 50''', (user["id"],)
+        ).fetchall()
+        conn.execute("UPDATE bbs_notifications SET seen=1 WHERE user_id=?", (user["id"],))
+
+    items = "".join(
+        f'''<a class="bbs-row" href="/bbs/post/{n['post_id']}" style="--accent:{BOARDS[n['board']]['accent']}">
+{_avatar(BOARDS[n['board']]['icon'])}
+<div><div class="bbs-title">{esc(n['actor_name'])} 回复了「{esc(n['title'])}」</div>
+<div class="bbs-meta">{'<span class="bbs-chip accent">未读</span>' if not int(n['seen'] or 0) else ''}<span>{esc((n['content'] or '')[:48])}</span><span>{esc((n['created_at'] or '')[:10])}</span></div></div>
+<div class="bbs-right"><div class="bbs-count">查看 →</div></div></a>'''
+        for n in rows
+    ) or _empty("还没有新回复", "有人回复你的帖子时会出现在这里。", '<a class="btn secondary" href="/bbs">回到 BBS</a>')
+
+    body = f'''<a class="bbs-back" href="/bbs">← 返回 BBS</a>
+<div class="bbs-head"><div><h2>收件箱</h2><p>别人对你帖子的回复。</p></div></div>
+<div class="bbs-list">{items}</div>'''
+    return _page(body, "收件箱 · 小飞侠 BBS")
+
+
+@router.post("/bbs/post/{post_id}/delete")
+def delete_own_post(request: Request, post_id: int):
+    """Authors can withdraw their own thread; admins use the moderation page."""
+    user = community_core.current_user(request)
+    if not user:
+        return RedirectResponse("/account/login", status_code=303)
+    with site.db() as conn:
+        post = conn.execute("SELECT user_id,board FROM bbs_posts WHERE id=?", (post_id,)).fetchone()
+        if not post:
+            raise HTTPException(404, "帖子不存在。")
+        if int(post["user_id"]) != int(user["id"]):
+            raise HTTPException(403, "只能删除自己的帖子。")
+        conn.execute("DELETE FROM bbs_posts WHERE id=?", (post_id,))
+    return RedirectResponse(f"/bbs?board={post['board']}", status_code=303)
+
+
+@router.post("/bbs/reply/{reply_id}/delete")
+def delete_own_reply(request: Request, reply_id: int):
+    user = community_core.current_user(request)
+    if not user:
+        return RedirectResponse("/account/login", status_code=303)
+    with site.db() as conn:
+        reply = conn.execute("SELECT user_id,post_id FROM bbs_replies WHERE id=?", (reply_id,)).fetchone()
+        if not reply:
+            raise HTTPException(404, "回复不存在。")
+        if int(reply["user_id"]) != int(user["id"]):
+            raise HTTPException(403, "只能删除自己的回复。")
+        conn.execute("DELETE FROM bbs_replies WHERE id=?", (reply_id,))
+    return RedirectResponse(f"/bbs/post/{reply['post_id']}", status_code=303)

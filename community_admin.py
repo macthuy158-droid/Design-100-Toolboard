@@ -339,7 +339,7 @@ def bbs_moderation(request: Request):
     <td><a href="/bbs/post/{p['id']}" target="_blank">{site.esc(p['title'])}</a></td>
     <td>{who(p)}</td><td>{int(p['reply_count'])}</td><td>{int(p['views'])}</td>
     <td class="muted">{site.esc((p['created_at'] or '')[:10])}</td>
-    <td><form action="/manage/community/bbs/posts/{p['id']}/delete" method="post" onsubmit="return confirm('删除该帖及其全部回复？此操作不可撤销。')"><button class="btn secondary mini">删除</button></form></td></tr>'''
+    <td><div class="actions"><form action="/manage/community/bbs/posts/{p['id']}/pin" method="post"><button class="btn secondary mini">{'取消置顶' if int(p['pinned'] or 0) else '置顶'}</button></form><form action="/manage/community/bbs/posts/{p['id']}/delete" method="post" onsubmit="return confirm('删除该帖及其全部回复？此操作不可撤销。')"><button class="btn secondary mini">删除</button></form></div></td></tr>'''
         for p in posts) or '<tr><td colspan="7">暂无帖子</td></tr>'
 
     reply_rows = ''.join(f'''<tr><td><a href="/bbs/post/{r['post_id']}" target="_blank">{site.esc(r['title'])}</a></td>
@@ -371,4 +371,16 @@ def delete_bbs_reply(request: Request, reply_id: int):
     with site.db() as conn:
         cur=conn.execute("DELETE FROM bbs_replies WHERE id=?", (reply_id,))
         if not cur.rowcount: raise HTTPException(404, "回复不存在。")
+    return RedirectResponse('/manage/community/bbs', 303)
+
+
+@app.post('/bbs/posts/{post_id}/pin')
+def pin_bbs_post(request: Request, post_id: int):
+    """Pinning is how a board's rules stay at the top of its list."""
+    require_admin(request)
+    with site.db() as conn:
+        row=conn.execute("SELECT pinned FROM bbs_posts WHERE id=?", (post_id,)).fetchone()
+        if not row: raise HTTPException(404, "帖子不存在。")
+        conn.execute("UPDATE bbs_posts SET pinned=? WHERE id=?",
+                     (0 if int(row['pinned'] or 0) else 1, post_id))
     return RedirectResponse('/manage/community/bbs', 303)
