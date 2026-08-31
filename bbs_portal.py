@@ -45,20 +45,18 @@ CSS = r'''<style>
 .bbs-stat b{display:block;font-size:24px;letter-spacing:-.04em;line-height:1}
 .bbs-stat span{font-size:9px;color:#8f9196;letter-spacing:.05em}
 
-.bbs-board-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:26px}
-.bbs-board{position:relative;background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px 18px 15px;transition:.16s;overflow:hidden;display:flex;flex-direction:column}
+.bbs-board-grid{display:flex;flex-direction:column;gap:9px;margin-bottom:26px}
+.bbs-board{position:relative;background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px 20px 15px 22px;transition:.16s;overflow:hidden;display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;align-items:center;gap:16px;color:#111}
 .bbs-board:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
-.bbs-board:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:#dadad6}
-.bbs-board-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.bbs-board .ico{font-size:20px;line-height:1}
-.bbs-board-count{font-size:9px;font-weight:750;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,#fff);border:1px solid color-mix(in srgb,var(--accent) 22%,#fff);border-radius:999px;padding:4px 8px;white-space:nowrap}
-.bbs-board h3{font-size:16px;margin:12px 0 5px;letter-spacing:-.03em}
-.bbs-board p{font-size:10.5px;line-height:1.6;color:#84868b;margin:0 0 12px}
-.bbs-board-go{margin-top:auto;font-size:10px;font-weight:700;color:var(--accent)}
-.bbs-board.active{background:#111;color:#fff;border-color:#111}
-.bbs-board.active p{color:#9a9ca0}
-.bbs-board.active .bbs-board-count{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.18);color:#fff}
-
+.bbs-board:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 3%,#fff)}
+.bbs-board .ico{font-size:19px;line-height:1}
+.bbs-board h3{font-size:15px;margin:0 0 3px;letter-spacing:-.03em}
+.bbs-board p{font-size:10.5px;line-height:1.55;color:#84868b;margin:0}
+.bbs-board-count{font-size:9px;font-weight:750;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,#fff);border:1px solid color-mix(in srgb,var(--accent) 22%,#fff);border-radius:999px;padding:4px 9px;white-space:nowrap}
+.bbs-board-go{font-size:10px;font-weight:700;color:var(--accent);white-space:nowrap}
+.bbs-board.active{background:color-mix(in srgb,var(--accent) 7%,#fff);border-color:color-mix(in srgb,var(--accent) 45%,#fff)}
+.bbs-board.active:before{width:5px}
+.bbs-board.active h3{color:var(--accent)}
 .bbs-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:0 0 13px}
 .bbs-head h2{font-size:23px;margin:0 0 4px;letter-spacing:-.04em}
 .bbs-head p{font-size:11px;color:#888;margin:0}
@@ -96,8 +94,8 @@ CSS = r'''<style>
 .bbs-note{font-size:11px;color:#888;margin-top:10px}
 .bbs-back{display:inline-block;font-size:11px;color:#777;margin-bottom:14px}
 .bbs-back:hover{color:#111}
-@media(max-width:880px){.bbs-board-grid{grid-template-columns:1fr}.bbs-hero{grid-template-columns:1fr;gap:22px;padding:28px 24px}.bbs-hero h1{font-size:31px}.bbs-stats{gap:22px}}
-@media(max-width:680px){.bbs-row{grid-template-columns:30px minmax(0,1fr);padding:14px 16px}.bbs-avatar{width:30px;height:30px;border-radius:9px}.bbs-right{grid-column:2;text-align:left;margin-top:6px}.bbs-head{flex-direction:column;align-items:flex-start}}
+@media(max-width:880px){.bbs-hero{grid-template-columns:1fr;gap:22px;padding:28px 24px}.bbs-hero h1{font-size:31px}.bbs-stats{gap:22px}}
+@media(max-width:680px){.bbs-board{grid-template-columns:26px minmax(0,1fr) auto;gap:12px;padding:14px 16px 14px 18px}.bbs-board-go{display:none}.bbs-row{grid-template-columns:30px minmax(0,1fr);padding:14px 16px}.bbs-avatar{width:30px;height:30px;border-radius:9px}.bbs-right{grid-column:2;text-align:left;margin-top:6px}.bbs-head{flex-direction:column;align-items:flex-start}}
 </style>'''
 
 
@@ -214,8 +212,10 @@ def bbs_home(request: Request, board: str = "all"):
 
     cards = "".join(
         f'''<a class="bbs-board {'active' if board == key else ''}" href="/bbs?board={key}" style="--accent:{meta['accent']}">
-<div class="bbs-board-top"><span class="ico">{meta['icon']}</span><span class="bbs-board-count">{counts[key]} {meta['unit']}</span></div>
-<h3>{meta['name']}</h3><p>{meta['desc']}</p><span class="bbs-board-go">进入 →</span></a>'''
+<span class="ico">{meta['icon']}</span>
+<div><h3>{meta['name']}</h3><p>{meta['desc']}</p></div>
+<span class="bbs-board-count">{counts[key]} {meta['unit']}</span>
+<span class="bbs-board-go">进入 →</span></a>'''
         for key, meta in BOARDS.items()
     )
 
