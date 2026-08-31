@@ -32,6 +32,7 @@ def admin_nav(active=""):
     <a class="btn {'secondary' if active!='users' else ''}" href="/manage/community/users">用户管理</a>
     <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
     <a class="btn {'secondary' if active!='coins' else ''}" href="/manage/community/coins">币值管理</a>
+    <a class="btn {'secondary' if active!='bbs' else ''}" href="/manage/community/bbs">BBS 管理</a>
     <a class="btn secondary" href="/manage/courses/">课程管理</a>
     </div>'''
 
@@ -308,3 +309,66 @@ def delete_review(request: Request, review_id: int):
         cur=conn.execute("DELETE FROM reviews WHERE id=?", (review_id,))
         if not cur.rowcount: raise HTTPException(404, "评价不存在。")
     return RedirectResponse('/manage/', 303)
+
+
+@app.get('/bbs', response_class=HTMLResponse)
+def bbs_moderation(request: Request):
+    """Moderation for the BBS, which the 树洞 board makes necessary.
+
+    Anonymous posts stay anonymous here: the author is recorded in the table
+    for accountability, but showing it on a routine moderation screen would
+    quietly break the promise the posting form makes.
+    """
+    require_admin(request)
+    import bbs_portal
+    bbs_portal.init_db()
+    with site.db() as conn:
+        posts = conn.execute('''SELECT p.*,u.display_name,
+            (SELECT COUNT(*) FROM bbs_replies r WHERE r.post_id=p.id) reply_count
+            FROM bbs_posts p JOIN community_users u ON u.id=p.user_id
+            ORDER BY p.id DESC LIMIT 60''').fetchall()
+        replies = conn.execute('''SELECT r.*,u.display_name,p.title,p.board
+            FROM bbs_replies r JOIN community_users u ON u.id=r.user_id
+            JOIN bbs_posts p ON p.id=r.post_id
+            ORDER BY r.id DESC LIMIT 40''').fetchall()
+
+    def who(row):
+        return '<span class="badge">匿名</span>' if int(row['anonymous'] or 0) else site.esc(row['display_name'])
+
+    post_rows = ''.join(f'''<tr><td>{bbs_portal.BOARDS.get(p['board'],{}).get('name',p['board'])}</td>
+    <td><a href="/bbs/post/{p['id']}" target="_blank">{site.esc(p['title'])}</a></td>
+    <td>{who(p)}</td><td>{int(p['reply_count'])}</td><td>{int(p['views'])}</td>
+    <td class="muted">{site.esc((p['created_at'] or '')[:10])}</td>
+    <td><form action="/manage/community/bbs/posts/{p['id']}/delete" method="post" onsubmit="return confirm('删除该帖及其全部回复？此操作不可撤销。')"><button class="btn secondary mini">删除</button></form></td></tr>'''
+        for p in posts) or '<tr><td colspan="7">暂无帖子</td></tr>'
+
+    reply_rows = ''.join(f'''<tr><td><a href="/bbs/post/{r['post_id']}" target="_blank">{site.esc(r['title'])}</a></td>
+    <td>{who(r)}</td><td>{site.esc((r['content'] or '')[:60])}</td>
+    <td class="muted">{site.esc((r['created_at'] or '')[:10])}</td>
+    <td><form action="/manage/community/bbs/replies/{r['id']}/delete" method="post" onsubmit="return confirm('删除这条回复？')"><button class="btn secondary mini">删除</button></form></td></tr>'''
+        for r in replies) or '<tr><td colspan="5">暂无回复</td></tr>'
+
+    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>BBS 管理</h1><div class="muted">删除违规帖子或回复。树洞的匿名帖在这里仍显示为「匿名」——发帖人已记录在库中，需要追溯时再单独查询。</div></div>{admin_nav('bbs')}</div>
+    <div class="summary"><div class="stat"><b>{len(posts)}</b><span>帖子（近 60）</span></div><div class="stat"><b>{len(replies)}</b><span>回复（近 40）</span></div></div>
+    <div class="card table-wrap"><h2>帖子</h2><table class="table"><thead><tr><th>板块</th><th>标题</th><th>作者</th><th>回复</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>{post_rows}</tbody></table></div>
+    <div class="card table-wrap"><h2>最近回复</h2><table class="table"><thead><tr><th>所属帖子</th><th>作者</th><th>内容摘要</th><th>时间</th><th>操作</th></tr></thead><tbody>{reply_rows}</tbody></table></div></div>'''
+    return HTMLResponse(page(body, 'BBS 管理 · 小飞侠设计100%'))
+
+
+@app.post('/bbs/posts/{post_id}/delete')
+def delete_bbs_post(request: Request, post_id: int):
+    require_admin(request)
+    with site.db() as conn:
+        # bbs_replies cascades on the post's foreign key.
+        cur=conn.execute("DELETE FROM bbs_posts WHERE id=?", (post_id,))
+        if not cur.rowcount: raise HTTPException(404, "帖子不存在。")
+    return RedirectResponse('/manage/community/bbs', 303)
+
+
+@app.post('/bbs/replies/{reply_id}/delete')
+def delete_bbs_reply(request: Request, reply_id: int):
+    require_admin(request)
+    with site.db() as conn:
+        cur=conn.execute("DELETE FROM bbs_replies WHERE id=?", (reply_id,))
+        if not cur.rowcount: raise HTTPException(404, "回复不存在。")
+    return RedirectResponse('/manage/community/bbs', 303)

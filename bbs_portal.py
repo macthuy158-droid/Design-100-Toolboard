@@ -8,6 +8,9 @@ import community_core
 
 router = APIRouter()
 
+MAX_TITLE = 100
+MAX_CONTENT = 5000
+
 BOARDS = {
     "lab": {
         "name": "黑科技实验室",
@@ -90,9 +93,13 @@ def bbs_home(request: Request, board: str = "all"):
     if board == "bounty":
         with site.db() as conn:
             exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounties'").fetchone()
-            rows = conn.execute("SELECT id,title,category,reward,status FROM bounties ORDER BY id DESC LIMIT 30").fetchall() if exists else []
+            rows = conn.execute(
+                "SELECT id,title,category,reward,status FROM bounties "
+                "WHERE status IN ('open','in_progress') "
+                "ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,id DESC LIMIT 30"
+            ).fetchall() if exists else []
         listing = "".join(
-            f'''<a class="bbs-row" href="/bounties/{r['id']}"><div><div class="bbs-title">{esc(r['title'])}</div><div class="bbs-meta">{esc(r['category'])} · {esc(r['status'])}</div></div><div class="bbs-bounty-money">{int(r['reward'] or 0):,} {coin_core.COIN_NAME}</div><div class="bbs-count">查看 →</div></a>'''
+            f'''<a class="bbs-row" href="/bounties/{r['id']}"><div><div class="bbs-title">{esc(r['title'])}</div><div class="bbs-meta">{esc(r['category'])} · {'招募中' if r['status']=='open' else '开发中'}</div></div><div class="bbs-bounty-money">{int(r['reward'] or 0):,} {coin_core.COIN_NAME}</div><div class="bbs-count">查看 →</div></a>'''
             for r in rows
         ) or '<div class="bbs-empty">悬赏墙还没有任务。</div>'
         actions = '<div class="bbs-actions"><a class="btn" href="/bounties/new">发布悬赏</a><a class="btn secondary" href="/bounties">全部交易</a></div>'
@@ -112,7 +119,8 @@ def bbs_home(request: Request, board: str = "all"):
             f'''<a class="bbs-row" href="/bbs/post/{r['id']}"><div><div class="bbs-title">{BOARDS[r['board']]['icon']} {esc(r['title'])}</div><div class="bbs-meta">{BOARDS[r['board']]['name']} · {esc(r['created_at'][:10])}</div></div><div class="bbs-author">{_identity(r, bool(r['anonymous']))}</div><div class="bbs-count">{int(r['reply_count'])} 回复<br>{int(r['views'])} 浏览</div></a>'''
             for r in rows
         ) or '<div class="bbs-empty">这里还没有帖子，发第一帖吧。</div>'
-        actions = '<div class="bbs-actions"><a class="btn" href="/bbs/new">+ 发帖</a></div>'
+        post_board = board if board in ("lab", "tree") else "lab"
+        actions = f'<div class="bbs-actions"><a class="btn" href="/bbs/new?board={post_board}">+ 发帖</a></div>'
         subtitle = "技术、交易和真实行业日常，都在这里发生。" if board == "all" else BOARDS[board]["desc"]
         title = "正在发生" if board == "all" else BOARDS[board]["name"]
 
@@ -124,16 +132,22 @@ def bbs_home(request: Request, board: str = "all"):
 
 
 @router.get("/bbs/new", response_class=HTMLResponse)
-def new_post(request: Request):
+def new_post(request: Request, board: str = "lab"):
     user = community_core.current_user(request)
     if not user:
         return RedirectResponse("/account/login?next=/bbs/new", status_code=303)
-    body = '''<a class="bbs-back" href="/bbs">← 返回 BBS</a><form class="bbs-form" method="post" action="/bbs/new"><h1>发一帖</h1>
-<label>板块</label><select name="board"><option value="lab">🧪 黑科技实验室</option><option value="tree">🌳 设计院树洞</option></select>
+    if board not in {"lab", "tree"}:
+        board = "lab"
+    opts = "".join(
+        f'''<option value="{key}" {"selected" if board == key else ""}>{BOARDS[key]["icon"]} {BOARDS[key]["name"]}</option>'''
+        for key in ("lab", "tree")
+    )
+    body = f'''<a class="bbs-back" href="/bbs?board={board}">← 返回 BBS</a><form class="bbs-form" method="post" action="/bbs/new"><h1>发一帖</h1>
+<label>板块</label><select name="board">{opts}</select>
 <label>标题</label><input type="text" name="title" maxlength="100" required placeholder="说清楚你想聊什么">
-<label>正文</label><textarea name="content" required placeholder="把问题、方法或者想说的话写下来"></textarea>
+<label>正文</label><textarea name="content" required maxlength="{MAX_CONTENT}" placeholder="把问题、方法或者想说的话写下来"></textarea>
 <label class="bbs-check"><input type="checkbox" name="anonymous" value="1"> 在设计院树洞匿名发布</label>
-<div class="bbs-actions"><button class="btn" type="submit">发布</button><a class="btn secondary" href="/bbs">取消</a></div></form>'''
+<div class="bbs-actions"><button class="btn" type="submit">发布</button><a class="btn secondary" href="/bbs?board={board}">取消</a></div></form>'''
     return _page(body, "发帖 · 小飞侠 BBS")
 
 
@@ -148,10 +162,14 @@ def create_post(request: Request, board: str = Form(...), title: str = Form(...)
     content = content.strip()
     if not title or not content:
         raise HTTPException(400, "标题和正文不能为空。")
+    if len(title) > MAX_TITLE:
+        raise HTTPException(400, f"标题最多 {MAX_TITLE} 字。")
+    if len(content) > MAX_CONTENT:
+        raise HTTPException(400, f"正文最多 {MAX_CONTENT} 字，当前 {len(content)} 字。")
     is_anon = 1 if board == "tree" and anonymous == "1" else 0
     stamp = community_core.now()
     with site.db() as conn:
-        cur = conn.execute("INSERT INTO bbs_posts(board,user_id,title,content,anonymous,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (board, user["id"], title[:100], content, is_anon, stamp, stamp))
+        cur = conn.execute("INSERT INTO bbs_posts(board,user_id,title,content,anonymous,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (board, user["id"], title, content, is_anon, stamp, stamp))
         pid = cur.lastrowid
     return RedirectResponse(f"/bbs/post/{pid}", status_code=303)
 
@@ -183,6 +201,8 @@ def reply_post(request: Request, post_id: int, content: str = Form(...), anonymo
     content = content.strip()
     if not content:
         raise HTTPException(400, "回复不能为空。")
+    if len(content) > MAX_CONTENT:
+        raise HTTPException(400, f"回复最多 {MAX_CONTENT} 字，当前 {len(content)} 字。")
     with site.db() as conn:
         post = conn.execute("SELECT board FROM bbs_posts WHERE id=?", (post_id,)).fetchone()
         if not post:
