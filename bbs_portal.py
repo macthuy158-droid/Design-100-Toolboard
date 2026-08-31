@@ -361,7 +361,12 @@ def create_post(request: Request, board: str = Form(...), title: str = Form(...)
 
 
 @router.get("/bbs/post/{post_id}", response_class=HTMLResponse)
-def post_detail(request: Request, post_id: int):
+def post_detail(request: Request, post_id: str):
+    # Declared as a string so a non-numeric path answers 404 rather than a
+    # validation error page.
+    if not post_id.isdigit():
+        raise HTTPException(404, "帖子不存在。")
+    post_id = int(post_id)
     init_db()
     with site.db() as conn:
         row = conn.execute("SELECT p.*,u.display_name,u.role FROM bbs_posts p JOIN community_users u ON u.id=p.user_id WHERE p.id=?", (post_id,)).fetchone()

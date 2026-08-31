@@ -31,6 +31,20 @@ def login_required(request):
     return user
 
 
+class _NeedsLogin(Exception):
+    """Raised by page handlers so a signed-out visitor lands on the form."""
+
+    def __init__(self, next_path):
+        self.next_path = next_path
+
+
+def page_login_required(request, next_path):
+    user = core.current_user(request)
+    if not user:
+        raise _NeedsLogin(next_path)
+    return user
+
+
 def developer_required(request):
     user = login_required(request)
     if user['role'] != core.ROLE_XIAOFEIXIA:
@@ -123,7 +137,10 @@ def logout():
 @router.get("/me", response_class=HTMLResponse)
 def me(request: Request):
     core.init_db()
-    user=login_required(request)
+    try:
+        user=page_login_required(request,'/account/me')
+    except _NeedsLogin as need:
+        return RedirectResponse(f'/account/login?next={need.next_path}',303)
     with site.db() as conn:
         orders=conn.execute("SELECT o.*,t.name FROM orders o JOIN tools t ON t.id=o.tool_id WHERE o.user_id=? ORDER BY o.id DESC",(user['id'],)).fetchall()
         submissions=conn.execute("SELECT * FROM tool_submissions WHERE user_id=? ORDER BY id DESC",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
@@ -232,7 +249,10 @@ def set_coin_price(request: Request, slug: str, feixia_coin_price: int = Form(0)
 
 @router.get("/orders/{order_id}", response_class=HTMLResponse)
 def order_page(request: Request, order_id: int):
-    user=login_required(request)
+    try:
+        user=page_login_required(request,f'/account/orders/{order_id}')
+    except _NeedsLogin as need:
+        return RedirectResponse(f'/account/login?next={need.next_path}',303)
     with site.db() as conn:
         o=conn.execute("SELECT o.*,t.name,t.slug FROM orders o JOIN tools t ON t.id=o.tool_id WHERE o.id=? AND o.user_id=?",(order_id,user['id'])).fetchone()
     if not o: raise HTTPException(404,"订单不存在。")
@@ -246,7 +266,10 @@ developer_router=APIRouter()
 
 @developer_router.get("/submit", response_class=HTMLResponse)
 def submit_page(request: Request, tool: str = ""):
-    core.init_db(); user=developer_required(request)
+    core.init_db()
+    if not core.current_user(request):
+        return RedirectResponse('/account/login?next=/developer/submit',303)
+    user=developer_required(request)
     with site.db() as conn:
         tools=conn.execute("SELECT id,name,slug,price_cents FROM tools WHERE owner_user_id=? ORDER BY active DESC,name",(user['id'],)).fetchall()
     selected_slug=tool.strip()
