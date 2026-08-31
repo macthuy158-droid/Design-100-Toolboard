@@ -91,3 +91,39 @@ def install_account_routes(app, community_portal):
         with site.db() as conn:
             conn.execute('''INSERT INTO developer_verification_applications(user_id,real_name,organization,department,profession,contact,note,status,admin_note,created_at,reviewed_at) VALUES(?,?,?,?,?,?,?,'pending','',?,NULL) ON CONFLICT(user_id) DO UPDATE SET real_name=excluded.real_name,organization=excluded.organization,department=excluded.department,profession=excluded.profession,contact=excluded.contact,note=excluded.note,status='pending',admin_note='',created_at=excluded.created_at,reviewed_at=NULL''',(user['id'],rn,org,department.strip(),profession.strip(),contact.strip(),note.strip(),core.now()))
         return RedirectResponse('/account/developer-verification',303)
+
+
+def install_admin_routes(admin_app, admin_portal):
+    init_db()
+
+    @admin_app.get('/developer-verification', response_class=HTMLResponse)
+    def review_list(request: Request):
+        admin_portal.require_admin(request)
+        with site.db() as conn:
+            rows = conn.execute('''SELECT a.*,u.display_name,u.email FROM developer_verification_applications a JOIN community_users u ON u.id=a.user_id ORDER BY CASE a.status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,a.id DESC''').fetchall()
+        cards=[]
+        for a in rows:
+            actions=''
+            if a['status']=='pending':
+                actions=f'''<form action="/manage/developer-verification/{a['id']}/approve" method="post" style="display:inline"><button class="btn">通过</button></form> <form action="/manage/developer-verification/{a['id']}/reject" method="post" style="display:inline"><input name="admin_note" placeholder="拒绝原因"><button class="btn secondary">拒绝</button></form>'''
+            cards.append(f'''<div class="admin-card" style="margin-bottom:12px"><span class="badge">{site.esc(a['status'])}</span><h2>{site.esc(a['real_name'])}</h2><div class="admin-sub">{site.esc(a['organization'])} · {site.esc(a['department'] or '未填部门')} · {site.esc(a['profession'] or '未填专业')}</div><p class="muted">账号：{site.esc(a['display_name'])} · {site.esc(a['email'] or '')}<br>联系方式：{site.esc(a['contact'] or '未填')}<br>{site.esc(a['note'] or '')}</p><div class="admin-actions">{actions}</div></div>''')
+        body=f'''<div class="admin-shell"><a class="backlink" href="/manage/">← 返回后台</a><div class="admin-head"><div><h1>小飞侠开发者认证</h1><div class="admin-sub">审核是否为中建设计系统相关单位员工本人。通过后自动开放软件发布权限。</div></div></div>{''.join(cards) if cards else '<div class="admin-card muted">暂无认证申请</div>'}</div>'''
+        return HTMLResponse(admin_portal.admin_page(body,'小飞侠开发者认证'))
+
+    @admin_app.post('/developer-verification/{application_id}/approve')
+    def approve(request: Request, application_id: int):
+        admin_portal.require_admin(request)
+        with site.db() as conn:
+            row=conn.execute('SELECT * FROM developer_verification_applications WHERE id=?',(application_id,)).fetchone()
+            if not row: raise HTTPException(404,'申请不存在。')
+            conn.execute("UPDATE developer_verification_applications SET status='approved',admin_note='',reviewed_at=? WHERE id=?",(core.now(),application_id))
+            conn.execute('UPDATE community_users SET role=?,updated_at=? WHERE id=?',(core.ROLE_XIAOFEIXIA,core.now(),row['user_id']))
+        return RedirectResponse('/manage/developer-verification',303)
+
+    @admin_app.post('/developer-verification/{application_id}/reject')
+    def reject(request: Request, application_id: int, admin_note: str = Form('')):
+        admin_portal.require_admin(request)
+        with site.db() as conn:
+            if not conn.execute('SELECT id FROM developer_verification_applications WHERE id=?',(application_id,)).fetchone(): raise HTTPException(404,'申请不存在。')
+            conn.execute("UPDATE developer_verification_applications SET status='rejected',admin_note=?,reviewed_at=? WHERE id=?",(admin_note.strip(),core.now(),application_id))
+        return RedirectResponse('/manage/developer-verification',303)
