@@ -3,6 +3,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 import app_v2 as site
+import coin_core
 import community_core
 
 router = APIRouter()
@@ -89,9 +90,9 @@ def bbs_home(request: Request, board: str = "all"):
     if board == "bounty":
         with site.db() as conn:
             exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounties'").fetchone()
-            rows = conn.execute("SELECT id,title,category,reward,currency,status FROM bounties ORDER BY id DESC LIMIT 30").fetchall() if exists else []
+            rows = conn.execute("SELECT id,title,category,reward,status FROM bounties ORDER BY id DESC LIMIT 30").fetchall() if exists else []
         listing = "".join(
-            f'''<a class="bbs-row" href="/bounties/{r['id']}"><div><div class="bbs-title">{esc(r['title'])}</div><div class="bbs-meta">{esc(r['category'])} · {esc(r['status'])}</div></div><div class="bbs-bounty-money">{int(r['reward'] or 0):,} {esc(r['currency'])}</div><div class="bbs-count">查看 →</div></a>'''
+            f'''<a class="bbs-row" href="/bounties/{r['id']}"><div><div class="bbs-title">{esc(r['title'])}</div><div class="bbs-meta">{esc(r['category'])} · {esc(r['status'])}</div></div><div class="bbs-bounty-money">{int(r['reward'] or 0):,} {coin_core.COIN_NAME}</div><div class="bbs-count">查看 →</div></a>'''
             for r in rows
         ) or '<div class="bbs-empty">悬赏墙还没有任务。</div>'
         actions = '<div class="bbs-actions"><a class="btn" href="/bounties/new">发布悬赏</a><a class="btn secondary" href="/bounties">全部交易</a></div>'
