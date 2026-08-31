@@ -1,5 +1,7 @@
 import hmac
 import os
+import threading
+import time
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -9,6 +11,66 @@ from app_v2 import ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, 
 from community_core import DEFAULT_TOOL_CATEGORY, TOOL_CATEGORIES
 
 ADMIN_USERNAME = os.getenv("TOOLBOARD_ADMIN_USERNAME", "admin").strip() or "admin"
+
+LOGIN_MAX_FAILS = int(os.getenv("TOOLBOARD_LOGIN_MAX_FAILS", "5"))
+LOGIN_LOCKOUT = int(os.getenv("TOOLBOARD_LOGIN_LOCKOUT", "900"))
+
+# Failed admin logins, per client address. In-process only: a restart clears
+# it, which is acceptable for an endpoint with a single legitimate user.
+_login_fails = {}
+_login_lock = threading.Lock()
+
+
+def client_ip(request: Request):
+    """The caller's address as nginx reports it.
+
+    nginx overwrites X-Real-IP with $remote_addr and the app listens only on
+    loopback, so the header cannot be forged from outside. X-Forwarded-For is
+    deliberately not used: $proxy_add_x_forwarded_for appends to whatever the
+    client sent, so its leading entries are attacker-controlled.
+    """
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    return request.client.host if request.client else "unknown"
+
+
+def login_retry_after(ip, now=None):
+    """Seconds the caller must wait, or 0 when they may try again."""
+    now = now or time.monotonic()
+    with _login_lock:
+        for key, stamps in list(_login_fails.items()):
+            fresh = [t for t in stamps if now - t < LOGIN_LOCKOUT]
+            if fresh:
+                _login_fails[key] = fresh
+            else:
+                del _login_fails[key]
+        fails = _login_fails.get(ip, [])
+        if len(fails) < LOGIN_MAX_FAILS:
+            return 0
+        return max(1, int(LOGIN_LOCKOUT - (now - min(fails))))
+
+
+def record_login_failure(ip, now=None):
+    now = now or time.monotonic()
+    with _login_lock:
+        fails = [t for t in _login_fails.get(ip, []) if now - t < LOGIN_LOCKOUT]
+        fails.append(now)
+        _login_fails[ip] = fails
+
+
+def clear_login_failures(ip):
+    with _login_lock:
+        _login_fails.pop(ip, None)
+
+
+def _same(a, b):
+    """Constant-time compare that tolerates non-ASCII.
+
+    hmac.compare_digest rejects str arguments outside ASCII with a TypeError,
+    which surfaced as a 500 instead of a clean 401 for a non-ASCII username.
+    """
+    return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 app = FastAPI(title="Design 100 Admin", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -82,11 +144,35 @@ def tool_admin(request: Request, slug: str):
 async def login(request: Request):
     if not ADMIN_PASSWORD:
         raise HTTPException(503,"后台账号未配置。")
-    data=await request.json()
+
+    ip=client_ip(request)
+    wait=login_retry_after(ip)
+    if wait:
+        raise HTTPException(429, f"尝试次数过多，请在 {wait // 60 + 1} 分钟后重试。",
+                            headers={"Retry-After": str(wait)})
+
+    try:
+        data=await request.json()
+    except Exception:
+        raise HTTPException(400,"请求格式不正确。")
+    if not isinstance(data, dict):
+        raise HTTPException(400,"请求格式不正确。")
+
     username=str(data.get('username','')).strip()
     password=str(data.get('password',''))
-    if not hmac.compare_digest(username,ADMIN_USERNAME) or not hmac.compare_digest(password,ADMIN_PASSWORD):
-        raise HTTPException(401,"管理员用户名或密码不正确。")
+    # Both compared every time so a wrong username costs the same as a wrong
+    # password, and neither can be told apart from the response.
+    ok_user=_same(username,ADMIN_USERNAME)
+    ok_pass=_same(password,ADMIN_PASSWORD)
+    if not (ok_user and ok_pass):
+        record_login_failure(ip)
+        left=max(0, LOGIN_MAX_FAILS-len(_login_fails.get(ip,[])))
+        detail="管理员用户名或密码不正确。"
+        if left<=2:
+            detail+=f"（还可尝试 {left} 次，之后将暂时锁定）"
+        raise HTTPException(401, detail)
+
+    clear_login_failures(ip)
     resp=JSONResponse({'success':True}); resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite='strict',max_age=8*3600); return resp
 
 
