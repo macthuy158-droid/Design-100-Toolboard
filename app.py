@@ -168,6 +168,9 @@ def branded_admin_page(body, title=f"{BRAND_NAME} · 管理后台"):
     body = body.replace("DESIGN 100 · PRODUCT ADMIN", f"{BRAND_NAME} · PRODUCT ADMIN")
     body = body.replace("DESIGN 100 · ADMIN", f"{BRAND_NAME} · ADMIN")
     body = body.replace("DESIGN 100", BRAND_NAME)
+    users_entry = '<a class="entry" href="/manage/community/users"><b>{users}</b><h2>用户管理</h2><p>管理小飞侠与社区成员账号。</p></a>'
+    if users_entry in body and '/manage/developer-verification' not in body:
+        body = body.replace(users_entry, users_entry + '<a class="entry" href="/manage/developer-verification"><b>✓</b><h2>开发者认证</h2><p>审核小飞侠开发者员工身份，开放软件发布权限。</p></a>')
     return _original_admin_page(body, brand_text(title))
 
 
