@@ -139,7 +139,7 @@ def login_redirect(path):
 
 def money(cents):
     cents = int(cents or 0)
-    return '免费' if cents <= 0 else f'¥{cents/100:,.0f}'
+    return '免费' if cents <= 0 else f'¥{cents/100:,.2f}'
 
 
 def safe_url(value):
@@ -159,6 +159,9 @@ def can_learn(conn, u, course):
         return True
     if int(course['price_cents'] or 0) <= 0:
         return True
+    import payment_core
+    if payment_core.has_access(conn, u['id'], 'course', course['id']):
+        return True
     return bool(conn.execute(
         'SELECT 1 FROM course_enrollments WHERE course_id=? AND user_id=?',
         (course['id'], u['id']),
@@ -169,7 +172,7 @@ def _stats_sql(where):
     return f'''SELECT c.*,
         (SELECT COUNT(*) FROM course_lessons l WHERE l.course_id=c.id) lesson_count,
         (SELECT COALESCE(SUM(duration_minutes),0) FROM course_lessons l WHERE l.course_id=c.id) minutes,
-        (SELECT COUNT(*) FROM course_enrollments e WHERE e.course_id=c.id) student_count
+        (SELECT COUNT(*) FROM (SELECT e.user_id FROM course_enrollments e WHERE e.course_id=c.id UNION SELECT e.user_id FROM purchase_entitlements e JOIN purchase_orders o ON o.id=e.order_id WHERE e.product_type='course' AND e.product_id=c.id AND o.status='paid')) student_count
         FROM courses c {where} ORDER BY c.id DESC'''
 
 
@@ -215,7 +218,10 @@ def mine(request: Request):
     with site.db() as conn:
         learning = conn.execute('''SELECT c.id,c.title,c.category,c.level,c.instructor
             FROM course_enrollments e JOIN courses c ON c.id=e.course_id
-            WHERE e.user_id=? ORDER BY e.id DESC''', (u['id'],)).fetchall()
+            WHERE e.user_id=? UNION SELECT c.id,c.title,c.category,c.level,c.instructor
+            FROM purchase_entitlements e JOIN courses c ON c.id=e.product_id
+            JOIN purchase_orders o ON o.id=e.order_id
+            WHERE e.user_id=? AND e.product_type='course' AND o.status='paid' ''', (u['id'], u['id'])).fetchall()
     rows = ''.join(
         f'<tr><td><a href="/courses/{c["id"]}">{site.esc(c["title"])}</a></td><td>{site.esc(c["category"])}</td><td>{site.esc(c["level"])}</td><td>{site.esc(c["instructor"])}</td></tr>'
         for c in learning) or '<tr><td colspan="4">还没有报名任何课程</td></tr>'
@@ -242,7 +248,7 @@ def detail(request: Request, course_id: str):
         if c['status'] != 'published' and not admin:
             raise HTTPException(404, '课程不存在。')
         lessons = conn.execute('SELECT * FROM course_lessons WHERE course_id=? ORDER BY sort_order,id', (course_id,)).fetchall()
-        students = conn.execute('SELECT COUNT(*) n FROM course_enrollments WHERE course_id=?', (course_id,)).fetchone()['n']
+        students = conn.execute("SELECT COUNT(*) n FROM (SELECT user_id FROM course_enrollments WHERE course_id=? UNION SELECT e.user_id FROM purchase_entitlements e JOIN purchase_orders o ON o.id=e.order_id WHERE e.product_type='course' AND e.product_id=? AND o.status='paid')", (course_id,course_id)).fetchone()['n']
         unlocked = admin or can_learn(conn, u, c)
         enrolled = bool(u and conn.execute('SELECT 1 FROM course_enrollments WHERE course_id=? AND user_id=?', (course_id, u['id'])).fetchone())
 
@@ -267,15 +273,16 @@ def detail(request: Request, course_id: str):
         buttons.append(f'<a class="btn" href="/manage/courses/{course_id}">在后台管理</a>')
     if not u:
         buttons.append(f'<a class="btn{" secondary" if admin else ""}" href="/account/login?next=/courses/{course_id}">登录后学习</a>')
-    elif u['role'] == core.ROLE_XIAOFEIXIA or enrolled:
+    elif unlocked:
         buttons.append('<span class="btn secondary">已可学习</span>')
     elif price <= 0:
         buttons.append(f'<form action="/courses/{course_id}/enroll" method="post"><button class="btn">免费报名</button></form>')
     else:
-        buttons.append('<span class="btn secondary">支付接入后开放购买</span>')
+        import payment_core
+        buttons.append(f'<form action="/account/purchases/new/course/{course_id}" method="post"><input type="hidden" name="csrf" value="{payment_core.csrf_token(request)}"><button class="btn">购买课程 · {money(price)}</button></form>')
 
     price_note = ('小飞侠：院内账号免费学习全部官方课程。' if u and u['role'] == core.ROLE_XIAOFEIXIA
-                  else ('免费课程，登录后即可报名学习。' if price <= 0 else '付费课程，统一支付接入后开放购买。'))
+                  else ('免费课程，登录后即可报名学习。' if price <= 0 else '人民币直接购买，付款后解锁全部课时，无需充值飞侠币。'))
     draft_note = '<div class="note">当前为草稿状态，只有管理员能看到这个页面。这是公开页预览，编辑请到后台课程管理。</div>' if admin and c['status'] == 'draft' else ''
     status_badge = f'<span class="status {"draft" if c["status"] == "draft" else ""}">{site.esc(STATUSES.get(c["status"], c["status"]))}</span>' if admin else ''
 

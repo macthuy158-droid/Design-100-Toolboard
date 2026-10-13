@@ -60,11 +60,13 @@ def toolboard(request: Request, q: str = "", category: str = ""):
                 if is_web
                 else f'<div class="downloads"><b>{int(t["downloads"]):,}</b><span>累计下载</span></div>'
             )
+            cents = int(t['price_cents'] or 0)
+            label = f'¥{cents/100:.2f}' if cents > 0 and not is_web else ('社区兑换' if t['legacy_coin_only'] and not is_web else '免费')
             cards.append(
                 f'''<a class="tool" href="/tools/{site.esc(t['slug'])}" data-category="{site.esc(cat)}" data-search="{site.esc(search_text)}">
 <div class="rank"><span>{rank_label}</span><span class="rank-num">#{i:02d}</span></div>
 <div class="icon">{site.esc(t['icon_text'])}</div><h3>{site.esc(t['name'])}</h3><div class="tagline">{site.esc(t['tagline'])}</div>
-<div class="chips"><span class="chip">{site.esc(cat)}</span><span class="chip">{site.esc(platform_label)}</span><span class="chip">v{site.esc(version)}</span></div>
+<div class="chips"><span class="chip">{site.esc(cat)}</span><span class="chip">{site.esc(platform_label)}</span><span class="chip">v{site.esc(version)}</span><span class="chip">{label}</span></div>
 <div class="footrow">{foot}<div class="arrow">↗</div></div></a>'''
             )
 

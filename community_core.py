@@ -268,7 +268,11 @@ def can_download(conn, user, tool):
         return False
     if coin_core.is_owner(tool, user['id']):
         return True
-    if coin_core.coin_price(tool) <= 0:
+    legacy_coin_only = 'legacy_coin_only' in tool.keys() and bool(tool['legacy_coin_only'])
+    if int(tool['price_cents'] or 0) <= 0 and not legacy_coin_only:
+        return True
+    import payment_core
+    if payment_core.has_access(conn, user['id'], 'tool', tool['id']):
         return True
     if coin_core.has_access(conn, user['id'], tool['id']):
         return True

@@ -43,13 +43,15 @@ def install_streaming_submit(router):
         category: str = Form(core.DEFAULT_TOOL_CATEGORY),
         platform: str = Form("Windows"),
         icon_text: str = Form("100"),
-        price_yuan: float = Form(0),
+        price_yuan: str = Form("0"),
         feixia_coin_price: int = Form(0),
         version: str = Form(...),
         notes: str = Form(""),
         app_url: str = Form(""),
         package: Optional[UploadFile] = File(None),
     ):
+        import payment_core
+        price_cents = payment_core.yuan_to_cents(price_yuan)
         core.init_db()
         user = core.current_user(request)
         if not user:
@@ -67,6 +69,8 @@ def install_streaming_submit(router):
             )
 
         is_web_app = submission_type == "new_web_app"
+        if is_web_app and price_cents > 0:
+            raise HTTPException(400, "网页工具目前仅支持免费发布。")
 
         tool = None
         if submission_type == "new_release":
@@ -77,6 +81,8 @@ def install_streaming_submit(router):
                 ).fetchone()
             if not tool:
                 raise HTTPException(status_code=404, detail="已有工具不存在。")
+            if tool["tool_type"] == "web_app" and price_cents > 0:
+                raise HTTPException(400, "网页工具目前仅支持免费使用。")
             if not core.is_tool_owner(tool, user):
                 raise HTTPException(status_code=403, detail="只有该工具原开发者可以提交新版本。")
             name = tool["name"]
@@ -145,7 +151,7 @@ def install_streaming_submit(router):
                         category.strip(),
                         platform.strip(),
                         icon_text.strip(),
-                        int(round(price_yuan * 100)),
+                        price_cents,
                         clean_version,
                         notes.strip(),
                         saved_package_name,

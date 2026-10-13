@@ -14,14 +14,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install -r requirements.txt httpx
+        run: pip install -r requirements.txt httpx==0.28.1
       - name: Compile Python files
         run: >-
           python -m py_compile
           app.py app_v2.py admin_portal.py community_core.py community_portal.py
           community_admin.py runtime_support.py upload_storage.py developer_upload.py
           main.py scripts/check_structure.py scripts/check_business_rules.py
-          scripts/check_upload_storage.py
+          scripts/check_upload_storage.py payment_core.py scripts/check_payments.py
       - name: Check route structure
         env: &test_env
           TOOLBOARD_ADMIN_USERNAME: admin
@@ -34,7 +34,7 @@ jobs:
         run: python scripts/check_business_rules.py
       - name: Check streaming upload storage
         env: *test_env
-        run: python scripts/check_upload_storage.py
+        run: python scripts/check_upload_storage.py payment_core.py scripts/check_payments.py
       - name: Check payment settlement security
         env: *test_env
         run: python scripts/check_payments.py

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import app_v2 as site
 import coin_core
+import payment_core
 import community_core as core
 
 router = APIRouter()
@@ -143,14 +144,15 @@ def me(request: Request):
         return RedirectResponse(f'/account/login?next={need.next_path}',303)
     with site.db() as conn:
         orders=conn.execute("SELECT o.*,t.name FROM orders o JOIN tools t ON t.id=o.tool_id WHERE o.user_id=? ORDER BY o.id DESC",(user['id'],)).fetchall()
+        purchases=conn.execute("SELECT * FROM purchase_orders WHERE user_id=? ORDER BY id DESC", (user['id'],)).fetchall()
         submissions=conn.execute("SELECT * FROM tool_submissions WHERE user_id=? ORDER BY id DESC",(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
         owned=conn.execute('''
             SELECT t.*,
                    (SELECT version FROM releases r WHERE r.tool_id=t.id AND r.active=1 ORDER BY r.id DESC LIMIT 1) current_version,
                    (SELECT COUNT(*) FROM reviews r WHERE r.tool_id=t.id) review_count,
                    (SELECT ROUND(AVG(rating),1) FROM reviews r WHERE r.tool_id=t.id) avg_rating,
-                   (SELECT COUNT(*) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0) paid_orders,
-                   (SELECT COALESCE(SUM(amount_cents),0) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0) paid_amount
+                   ((SELECT COUNT(*) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0)+(SELECT COUNT(*) FROM purchase_orders o WHERE o.product_type='tool' AND o.product_id=t.id AND o.seller_user_id=t.owner_user_id AND o.status='paid')) paid_orders,
+                   ((SELECT COALESCE(SUM(amount_cents),0) FROM orders o WHERE o.tool_id=t.id AND o.status='paid' AND o.amount_cents>0)+(SELECT COALESCE(SUM(amount_cents),0) FROM purchase_orders o WHERE o.product_type='tool' AND o.product_id=t.id AND o.seller_user_id=t.owner_user_id AND o.status='paid')) paid_amount
             FROM tools t WHERE t.owner_user_id=? ORDER BY t.active DESC,t.name
         ''',(user['id'],)).fetchall() if user['role']==core.ROLE_XIAOFEIXIA else []
         coin_name=coin_core.COIN_NAME
@@ -159,6 +161,8 @@ def me(request: Request):
         coin_earned=coin_core.earned(conn,user['id'])
 
     order_rows=''.join(f'<tr><td>{site.esc(o["name"])}</td><td>¥{o["amount_cents"]/100:.2f}</td><td>{site.esc(o["status"])}</td></tr>' for o in orders) or '<tr><td colspan="3">暂无订单</td></tr>'
+    purchase_rows=''.join(f'<tr><td><a href="/account/purchases/{o["id"]}">{site.esc(o["product_name"])}</a></td><td>¥{o["amount_cents"]/100:.2f}</td><td>{payment_core.STATUS_LABELS.get(o["status"], "处理中")}</td></tr>' for o in purchases)
+    order_rows=purchase_rows+order_rows
     sub_rows=''.join(f'<tr><td>{site.esc(s["name"] or s["version"])}</td><td>{"新工具" if s["submission_type"]=="new_tool" else "版本更新"}</td><td>{site.esc(s["version"])}</td><td>{site.esc(s["status"])}</td></tr>' for s in submissions) or '<tr><td colspan="4">暂无投稿</td></tr>'
 
     tool_cards=[]
@@ -170,14 +174,15 @@ def me(request: Request):
         paid_amount=int(t['paid_amount'] or 0)/100
         state='<span class="status-dot">已上架</span>' if t['active'] else '<span class="status-dot off">已下架</span>'
         tool_cards.append(f'''<div class="dev-tool"><div class="dev-tool-head"><div><h3>{site.esc(t['name'])}</h3><div class="dev-tool-sub">/{site.esc(t['slug'])} · {site.esc(t['platform'])}</div></div>{state}</div>
-        <div class="dev-stats"><div class="dev-stat"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="dev-stat"><b>{coin_core.coin_price(t)}</b><span>下载飞侠币</span></div><div class="dev-stat"><b>{int(t['downloads'] or 0):,}</b><span>累计下载</span></div><div class="dev-stat"><b>{rating} / 5</b><span>{reviews} 条评价</span></div><div class="dev-stat"><b>{paid_orders}</b><span>已确认购买</span></div><div class="dev-stat"><b>¥{paid_amount:.2f}</b><span>已确认销售额</span></div></div>
-        <form class="coin-price-form" action="/account/tools/{site.esc(t['slug'])}/coin-price" method="post"><label>下载价格</label><input name="feixia_coin_price" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="{coin_core.coin_price(t)}" title="他人下载需支付的飞侠币，0 为免费"><span class="coin-unit">飞侠币（0 = 免费）</span><button class="btn secondary">保存</button></form>
+        <div class="dev-stats"><div class="dev-stat"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="dev-stat"><b>{coin_core.coin_price(t)}</b><span>社区兑换积分</span></div><div class="dev-stat"><b>{int(t['downloads'] or 0):,}</b><span>累计下载</span></div><div class="dev-stat"><b>{rating} / 5</b><span>{reviews} 条评价</span></div><div class="dev-stat"><b>{paid_orders}</b><span>已确认购买</span></div><div class="dev-stat"><b>¥{paid_amount:.2f}</b><span>现金销售总额（未结算）</span></div></div>
+        <form class="coin-price-form" action="/account/tools/{site.esc(t['slug'])}/coin-price" method="post"><input type="hidden" name="csrf" value="{payment_core.csrf_token(request)}"><label>社区兑换（0 = 关闭）</label><input name="feixia_coin_price" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="{coin_core.coin_price(t)}" title="社区兑换所需积分，0 为关闭兑换"><span class="coin-unit">飞侠币（0 = 关闭）</span><button class="btn secondary">保存</button></form>
+        <form class="coin-price-form" action="/account/tools/{site.esc(t['slug'])}/cash-price" method="post"><input type="hidden" name="csrf" value="{payment_core.csrf_token(request)}"><label>人民币售价</label><input name="price_yuan" type="number" min="0" max="100000" step="0.01" value="{int(t['price_cents'] or 0)/100:.2f}" required><span class="coin-unit">元</span><button class="btn secondary">保存</button></form>
         <div class="dev-actions"><a class="btn" href="/developer/submit?tool={site.esc(t['slug'])}">提交新版本</a><a class="btn secondary" href="/tools/{site.esc(t['slug'])}">查看产品</a></div></div>''')
 
     led=''.join(f'<tr><td>{site.esc(coin_core.REASON_LABELS.get(r["reason"],r["reason"]))}</td><td>{site.esc(r["note"] or "—")}</td><td class="{"coin-plus" if int(r["delta"])>0 else "coin-minus"}">{"+" if int(r["delta"])>0 else ""}{int(r["delta"])}</td><td>{site.esc((r["created_at"] or "")[:10])}</td></tr>' for r in coin_rows) or f'<tr><td colspan="4">暂无{coin_name}记录</td></tr>'
     wallet_intro=(f'注册赠送 {coin_core.REGISTER_BONUS} 个；工具审核通过再得 {coin_core.PUBLISH_REWARD} 个。'
-                  f'你的工具被别人下载时，对方支付的{coin_core.COIN_NAME}归你；下载他人工具或发布悬赏则消耗。')
-    coin_html=f'''<div class="community-card"><div class="dev-tool-head"><div><h2>{coin_name}钱包</h2><p class="muted">{wallet_intro}</p></div><div class="coin-balance"><b>{coin_balance}</b><span>当前余额</span></div></div>
+                  f'你的工具被别人兑换时，对方使用的{coin_core.COIN_NAME}归你；兑换他人工具或发布悬赏则消耗。现金购买另行记账，积分不充值、不提现。')
+    coin_html=f'''<div class="community-card"><div class="dev-tool-head"><div><h2>{coin_name} · 社区积分</h2><p class="muted">{wallet_intro}</p></div><div class="coin-balance"><b>{coin_balance}</b><span>当前余额</span></div></div>
     <div class="dev-stats" style="grid-template-columns:repeat(2,1fr)"><div class="dev-stat"><b>{coin_earned}</b><span>累计获得</span></div><div class="dev-stat"><b>{coin_earned-coin_balance}</b><span>累计消耗</span></div></div>
     <div class="section-title">最近流水</div><div class="table-wrap"><table class="table"><thead><tr><th>类型</th><th>说明</th><th>变动</th><th>时间</th></tr></thead><tbody>{led}</tbody></table></div></div>'''
 
@@ -205,35 +210,41 @@ def review(request: Request, slug: str, rating: int = Form(...), content: str = 
 
 
 @router.post("/tools/{slug}/order")
-def create_order(request: Request, slug: str):
-    user=login_required(request)
-    if user['role']==core.ROLE_XIAOFEIXIA: return RedirectResponse(f'/tools/{slug}/download',303)
+def create_order(request: Request, slug: str, csrf: str = Form("")):
+    user = login_required(request)
+    payment_core.check_csrf(request, csrf)
     with site.db() as conn:
-        tool=conn.execute("SELECT * FROM tools WHERE slug=? AND active=1",(slug,)).fetchone()
-        if not tool: raise HTTPException(404,"工具不存在。")
-        if core.can_download(conn,user,tool): return RedirectResponse(f'/tools/{slug}/download',303)
-        price=int(tool['price_cents'] or 0)
-        if price<=0: raise HTTPException(409,"该工具的同行价格尚未配置，请联系管理员。")
-        order_no='D100'+secrets.token_hex(8).upper(); cur=conn.execute("INSERT INTO orders(order_no,user_id,tool_id,amount_cents,status,created_at) VALUES(?,?,?,?,?,?)",(order_no,user['id'],tool['id'],price,'pending',core.now())); oid=cur.lastrowid
-    return RedirectResponse(f'/account/orders/{oid}',303)
+        tool = conn.execute("SELECT id FROM tools WHERE slug=? AND active=1", (slug,)).fetchone()
+        if not tool:
+            raise HTTPException(404, "工具不存在。")
+        oid = payment_core.create_purchase(conn, user, 'tool', tool['id'])
+    return RedirectResponse(f'/account/purchases/{oid}', 303)
 
 
 @router.post("/tools/{slug}/coin-unlock")
-def coin_unlock(request: Request, slug: str):
+def coin_unlock(request: Request, slug: str, csrf: str = Form("")):
     """Spend 飞侠币 to unlock another developer's tool."""
     user = login_required(request)
+    payment_core.check_csrf(request, csrf)
     with site.db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         tool = conn.execute("SELECT * FROM tools WHERE slug=? AND active=1", (slug,)).fetchone()
         if not tool:
             raise HTTPException(404, "工具不存在。")
+        pending = conn.execute("SELECT id,provider FROM purchase_orders WHERE user_id=? AND product_type='tool' AND product_id=? AND status='pending'", (user['id'], tool['id'])).fetchone()
+        if pending and pending['provider'] and not core.can_download(conn, user, tool):
+            raise HTTPException(409, "该工具有待确认的现金支付订单，请先核对付款状态。")
         coin_core.purchase(conn, user, tool)
+        if pending and not pending['provider']:
+            conn.execute("UPDATE purchase_orders SET status='cancelled' WHERE id=?", (pending['id'],))
     return RedirectResponse(f'/tools/{slug}', 303)
 
 
 @router.post("/tools/{slug}/coin-price")
-def set_coin_price(request: Request, slug: str, feixia_coin_price: int = Form(0)):
+def set_coin_price(request: Request, slug: str, feixia_coin_price: int = Form(0), csrf: str = Form("")):
     """Tool owners set what other developers pay to download."""
     user = developer_required(request)
+    payment_core.check_csrf(request, csrf)
     if feixia_coin_price < 0 or feixia_coin_price > coin_core.MAX_PRICE:
         raise HTTPException(400, f"价格需在 0—{coin_core.MAX_PRICE} 之间。")
     with site.db() as conn:
@@ -244,6 +255,23 @@ def set_coin_price(request: Request, slug: str, feixia_coin_price: int = Form(0)
             raise HTTPException(403, "只有该工具的开发者可以设置价格。")
         conn.execute("UPDATE tools SET feixia_coin_price=?,updated_at=? WHERE id=?",
                      (feixia_coin_price, core.now(), tool['id']))
+    return RedirectResponse('/account/me', 303)
+
+
+@router.post("/tools/{slug}/cash-price")
+def set_cash_price(request: Request, slug: str, price_yuan: str = Form(...), csrf: str = Form("")):
+    user = developer_required(request)
+    payment_core.check_csrf(request, csrf)
+    cents = payment_core.yuan_to_cents(price_yuan)
+    with site.db() as conn:
+        tool = conn.execute("SELECT * FROM tools WHERE slug=?", (slug,)).fetchone()
+        if not tool:
+            raise HTTPException(404, "工具不存在。")
+        if not core.is_tool_owner(tool, user):
+            raise HTTPException(403, "只有原开发者可以设置价格。")
+        if tool['tool_type'] == 'web_app' and cents > 0:
+            raise HTTPException(400, "网页工具目前仅支持免费使用。")
+        conn.execute("UPDATE tools SET price_cents=?,legacy_coin_only=0,updated_at=? WHERE id=?", (cents, core.now(), tool['id']))
     return RedirectResponse('/account/me', 303)
 
 
@@ -271,16 +299,16 @@ def submit_page(request: Request, tool: str = ""):
         return RedirectResponse('/account/login?next=/developer/submit',303)
     user=developer_required(request)
     with site.db() as conn:
-        tools=conn.execute("SELECT id,name,slug,price_cents FROM tools WHERE owner_user_id=? ORDER BY active DESC,name",(user['id'],)).fetchall()
+        tools=conn.execute("SELECT id,name,slug,price_cents,feixia_coin_price FROM tools WHERE owner_user_id=? ORDER BY active DESC,name",(user['id'],)).fetchall()
     selected_slug=tool.strip()
-    opts=''.join(f'<option value="{site.esc(t["slug"])}" {"selected" if t["slug"]==selected_slug else ""}>{site.esc(t["name"])} · ¥{int(t["price_cents"] or 0)/100:.2f}</option>' for t in tools)
+    opts=''.join(f'<option data-price="{int(t["price_cents"] or 0)/100:.2f}" data-coin="{coin_core.coin_price(t)}" value="{site.esc(t["slug"])}" {"selected" if t["slug"]==selected_slug else ""}>{site.esc(t["name"])} · ¥{int(t["price_cents"] or 0)/100:.2f}</option>' for t in tools)
     default_type='new_release' if selected_slug and any(t['slug']==selected_slug for t in tools) else 'new_tool'
     category_opts=''.join(f'<option value="{site.esc(c)}">{site.esc(c)}</option>' for c in core.TOOL_CATEGORIES)
     body=f'''<div class="community-wrap"><div class="community-card"><span class="role">小飞侠开发者</span><h1>提交工具 / 新版本</h1><div class="notice">新工具可自行提交；已有工具的新版本只允许原开发者提交。网页工具提交后由管理员审核上架。</div>
     <form action="/developer/submit" method="post" enctype="multipart/form-data"><div class="field"><label>投稿类型</label><select name="submission_type" id="sub-type"><option value="new_tool" {"selected" if default_type=="new_tool" else ""}>新桌面工具</option><option value="new_web_app">新网页工具（小飞侠 Cloud）</option><option value="new_release" {"selected" if default_type=="new_release" else ""}>已有工具新版本</option></select></div>
-    <div class="field" id="field-existing"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><select name="category">{category_opts}</select></div></div><div><div class="field" id="field-platform"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field" id="field-price"><label>下载价格 · 飞侠币（0 = 免费）</label><input name="feixia_coin_price" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="0"><div class="muted" style="margin-top:5px">别人下载支付的{coin_core.COIN_NAME}全部归你。审核通过还会获得 {coin_core.PUBLISH_REWARD} 个发布奖励。</div></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
+    <div class="field" id="field-existing"><label>已有工具（仅显示你自己的工具）</label><select name="existing_slug"><option value="">—</option>{opts}</select></div><div class="community-grid"><div><div class="field"><label>工具名称</label><input name="name"></div><div class="field"><label>一句话介绍</label><input name="tagline"></div><div class="field"><label>分类</label><select name="category">{category_opts}</select></div></div><div><div class="field" id="field-platform"><label>平台</label><input name="platform" value="Windows"></div><div class="field"><label>图标文字</label><input name="icon_text" value="100"></div><div class="field" id="field-price"><label>人民币售价（0 = 免费）</label><input name="price_yuan" type="number" min="0" max="100000" step="0.01" value="0"><label>社区兑换 · 飞侠币（0 = 关闭）</label><input name="feixia_coin_price" type="number" min="0" max="{coin_core.MAX_PRICE}" step="1" value="0"><div class="muted" style="margin-top:5px">可选开启社区兑换，积分归开发者；现金销售独立记账。审核通过还会获得 {coin_core.PUBLISH_REWARD} 个发布奖励。</div></div><div class="field"><label>版本号</label><input name="version" required></div></div></div>
     <div class="field"><label>完整介绍</label><textarea name="description"></textarea></div><div class="field"><label>更新说明</label><textarea name="notes"></textarea></div><div class="field" id="field-package"><label>安装包（仅支持 .zip）</label><input name="package" type="file" accept=".zip"></div><div class="field" id="field-appurl" style="display:none"><label>工具访问地址</label><input name="app_url" placeholder="https://your-app.example.com"></div><button class="btn">提交审核</button></form></div></div>
-    <script>!function(){{const s=document.getElementById('sub-type'),pkg=document.getElementById('field-package'),url=document.getElementById('field-appurl'),plat=document.getElementById('field-platform'),ex=document.getElementById('field-existing'),pr=document.getElementById('field-price');function u(){{const v=s.value,web=v==='new_web_app';pkg.style.display=web?'none':'';url.style.display=web?'':'none';plat.style.display=web?'none':'';ex.style.display=v==='new_release'?'':'none';if(web){{plat.querySelector('input').value='Web';pr.querySelector('input').value='0'}}else{{plat.querySelector('input').value='Windows'}}const fi=pkg.querySelector('input');if(fi)fi.required=!web&&v!=='new_release'}}s.addEventListener('change',u);u()}}()</script>'''
+    <script>!function(){{const s=document.getElementById('sub-type'),pkg=document.getElementById('field-package'),url=document.getElementById('field-appurl'),plat=document.getElementById('field-platform'),ex=document.getElementById('field-existing'),pr=document.getElementById('field-price');function u(){{const v=s.value,web=v==='new_web_app';pkg.style.display=web?'none':'';url.style.display=web?'':'none';plat.style.display=web?'none':'';ex.style.display=v==='new_release'?'':'none';if(web){{plat.querySelector('input').value='Web';pr.querySelectorAll('input').forEach(i=>i.value='0')}}else{{plat.querySelector('input').value='Windows'}}const fi=pkg.querySelector('input');if(fi)fi.required=!web&&v!=='new_release'}}function prices(){{if(s.value==='new_release'){{const o=ex.querySelector('select').selectedOptions[0];if(o&&o.dataset.price){{pr.querySelector('[name=price_yuan]').value=o.dataset.price;pr.querySelector('[name=feixia_coin_price]').value=o.dataset.coin}}}}}}ex.querySelector('select').addEventListener('change',prices);s.addEventListener('change',()=>{{u();prices()}});u();prices()}}()</script>'''
     return HTMLResponse(page(body,"开发者投稿 · 小飞侠设计100%"))
 
 
@@ -325,15 +353,19 @@ def install_public_routes(app):
         is_web=tool_type=='web_app' and app_url
         if is_web:
             action=f'<a class="btn" href="{site.esc(app_url)}" target="_blank" rel="noopener">立即使用 →</a>'
-        elif not user: action=f'<a class="btn" href="/account/login?next=/tools/{site.esc(slug)}">登录后下载</a>'
+        elif not user: action=f'<a class="btn" href="/account/login?next=/tools/{site.esc(slug)}">登录后购买或下载</a>'
         elif allowed: action=f'<a class="btn" href="/tools/{site.esc(slug)}/download">下载 · v{site.esc(version)}</a>'
-        elif coin_cost>0:
-            affordable=coin_balance>=coin_cost
-            action=(f'<form action="/account/tools/{site.esc(slug)}/coin-unlock" method="post"><button class="btn">花费 {coin_cost} {coin_name}下载</button></form>'
-                    if affordable else f'<span class="btn" style="background:#999">需要 {coin_cost} {coin_name}（余额 {coin_balance}）</span>')
-            hint='' if affordable else f'　发布工具可获得{coin_name}。'
-            action+=f'<div class="muted" style="margin-top:9px">当前余额 {coin_balance} {coin_name} · 一次解锁后永久可下载{hint}</div>'
-        else: action=f'<span class="btn" style="background:#999">{coin_name}价格待配置</span>'
+        else:
+            action=''
+            token=payment_core.csrf_token(request)
+            if price>0:
+                action=f'<form action="/account/purchases/new/tool/{t["id"]}" method="post"><input type="hidden" name="csrf" value="{token}"><button class="btn">购买工具 · ¥{price/100:.2f}</button></form>'
+            if coin_cost>0:
+                affordable=coin_balance>=coin_cost
+                action+=(f'<form action="/account/tools/{site.esc(slug)}/coin-unlock" method="post" style="margin-top:12px"><input type="hidden" name="csrf" value="{token}"><button class="btn secondary">社区兑换 · {coin_cost} {coin_name}</button></form>'
+                         if affordable else f'<p class="muted">社区兑换需 {coin_cost} {coin_name}，当前余额 {coin_balance}。</p>')
+            if not action:
+                action='<span class="btn secondary">暂不可购买</span>'
         review_html=''.join(f'<div class="review"><div><b>{site.esc(r["display_name"])}</b> · <span class="stars">{"★"*int(r["rating"])}{"☆"*(5-int(r["rating"]))}</span></div><p>{site.esc(r["content"])}</p></div>' for r in reviews) or '<p>暂无评价，欢迎成为第一个评价的人。</p>'
         review_form=f'''<form action="/account/tools/{site.esc(slug)}/review" method="post"><div class="field"><label>评分 1-5</label><input name="rating" type="number" min="1" max="5" value="5" required></div><div class="field"><label>留言</label><textarea name="content"></textarea></div><button class="btn secondary">发布评价</button></form>''' if user else '<a class="btn secondary" href="/account/login?next=/tools/'+site.esc(slug)+'">登录后评价</a>'
         role_nav=(f'<a class="admin-link" href="/account/me">{site.esc(user["display_name"])} · {core.role_label(user["role"])}</a>' if user else '<a class="admin-link" href="/account/login">登录 / 注册</a>')
@@ -342,11 +374,16 @@ def install_public_routes(app):
         if is_web:
             obtain_text='小飞侠 Cloud 网页工具，打开即用，无需下载安装。'
             obtain_price='☁️ 在线使用'
-        elif coin_cost>0:
-            obtain_text=f'支付 {coin_cost} {coin_name}解锁下载，解锁一次后永久可用。\n你支付的{coin_name}归该工具的开发者所有。'
+        elif price>0:
+            obtain_text='人民币直接购买，付款后永久解锁该工具下载，无需充值飞侠币。'
+            if coin_cost>0:
+                obtain_text+=f' 也可使用 {coin_cost} {coin_name}进行社区兑换。'
+            obtain_price=f'¥{price/100:.2f}'
+        elif coin_cost>0 and t['legacy_coin_only']:
+            obtain_text='该工具支持社区积分兑换，现金售价尚未设置。'
             obtain_price=f'{coin_cost} {coin_name}'
         else:
-            obtain_text=f'该工具免费，登录后即可下载。'
+            obtain_text='该工具免费，登录后即可下载。'
             obtain_price='免费'
         body=nav_html+f'''<div class="shell"><section class="detail-hero"><a class="back" href="/">← 返回 Desgin 100%</a><div class="product"><div><div class="eyebrow">{site.esc(t['category'])} · {site.esc(platform_label)}</div><h1>{site.esc(t['name'])}</h1><div class="lead">{site.esc(t['tagline'])}</div><div class="facts"><div class="fact"><b>v{site.esc(version)}</b><span>当前版本</span></div><div class="fact"><b>{int(t['downloads']):,}</b><span>累计下载</span></div><div class="fact"><b>{site.esc(developer)}</b><span>开发者</span></div><div class="fact"><b>{(str(round(avg['a'],1))+' / 5') if avg['c'] else '—'}</b><span>{avg['c']} 条评价</span></div></div>{action}</div><div class="product-icon">{site.esc(t['icon_text'])}</div></div></section><section class="detail-grid"><div class="panel"><h2>工具介绍</h2><p>{site.esc(t['description'])}</p></div><div class="panel"><h2>获取方式</h2><p>{obtain_text}</p><div class="price">{obtain_price}</div></div></section><section id="reviews" class="panel" style="margin-bottom:80px"><h2>评价与留言</h2>{review_form}<div style="margin-top:24px">{review_html}</div></section></div>'''
         return HTMLResponse(site.page(body,f"{t['name']} · 小飞侠设计100%",EXTRA_CSS))

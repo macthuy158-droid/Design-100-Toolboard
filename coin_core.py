@@ -1,13 +1,9 @@
-"""飞侠币 — the single credit currency the platform runs on.
+"""Community contribution points, independent of cash purchases.
 
-Nobody pays cash. A 小飞侠 earns 飞侠币 by registering and by publishing tools,
-and spends them downloading other people's tools or funding bounties; whatever
-a downloader spends, the tool's owner receives. The store is a closed loop.
-
-The ledger is the source of truth; a balance is the sum of a user's rows. Every
-grant carries a dedupe key backed by a unique index, so a replayed approval
-cannot mint twice and a resubmitted unlock cannot charge twice. Deliberately no
-dependency on community_core, which imports this module for the download gate.
+Points are awarded for registration and publishing, exchanged for opted-in
+community tools or used in bounties. No cash recharge or withdrawal exists.
+The ledger is the balance source of truth; unique dedupe keys prevent repeated
+awards and exchanges. Cash sales and entitlements live in payment_core.
 """
 
 import math
@@ -32,7 +28,7 @@ REASON_LABELS = {
     "bounty_escrow": "发布悬赏冻结",
     "bounty_refund": "悬赏取消退回",
     "bounty_payout": "悬赏赏金收入",
-    "admin_adjust": "管理员充值 / 调整",
+    "admin_adjust": "社区积分奖励 / 调整",
 }
 
 
@@ -63,13 +59,6 @@ def _migrate_price_columns(conn, table):
             f"WHERE youxia_coin_price>0 AND {PRICE_COLUMN}=0"
         )
         conn.execute(f"ALTER TABLE {table} DROP COLUMN youxia_coin_price")
-    elif "price_cents" in cols:
-        # Never went through the two-currency step: convert straight from 元,
-        # at ¥1 = 1 游侠币 = 0.5 飞侠币.
-        conn.execute(
-            f"UPDATE {table} SET {PRICE_COLUMN}=(CAST(price_cents/100 AS INTEGER)+1)/2 "
-            f"WHERE price_cents>0 AND {PRICE_COLUMN}=0"
-        )
 
 
 def init_db():
@@ -165,12 +154,15 @@ def grant_publish_reward(conn, user_id, submission_id, tool_id, note=""):
 
 
 def purchase(conn, buyer, tool):
-    """Charge the buyer and pay the tool owner.
+    """Exchange community points; never a cash sale.
 
     Raises 409 when the tool is unpriced or the balance will not cover it.
     Returns the amount charged; 0 means nothing was owed.
     """
+    import community_core
     price = coin_price(tool)
+    if community_core.can_download(conn, buyer, tool):
+        return 0
     if is_owner(tool, buyer["id"]):
         return 0
     if has_access(conn, buyer["id"], tool["id"]):
