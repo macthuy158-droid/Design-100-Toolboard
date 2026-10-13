@@ -384,10 +384,16 @@ def add_xiaofeixia(name: str, password: str = ""):
 
 def grant_order(order_id: int):
     with site.db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not order:
             return False
         if int(order['amount_cents'] or 0) <= 0:
+            return False
+        if order['status'] == 'paid':
+            return True
+        # Do not overwrite online transactions or resurrect closed orders.
+        if order['status'] != 'pending' or order['provider'] not in ('', 'manual'):
             return False
         stamp = now()
         conn.execute("UPDATE orders SET status='paid',provider='manual',paid_at=? WHERE id=?", (stamp,order_id))
