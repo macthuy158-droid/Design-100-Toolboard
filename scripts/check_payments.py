@@ -80,7 +80,8 @@ assert client.post('/api/payments/settled', content=body, headers=headers).statu
 assert client.get(f'/account/purchases/{oid}/status').status_code == 401
 client.cookies.set(core.USER_COOKIE, core.make_session(other))
 assert client.get(f'/account/purchases/{oid}/status').status_code == 404
-client.cookies.set(core.USER_COOKIE, core.make_session(buyer))
+buyer_session = core.make_session(buyer)
+client.cookies.set(core.USER_COOKIE, buyer_session)
 result = client.get(f'/account/purchases/{oid}/status')
 assert result.json() == {'status': 'paid'}
 assert result.headers['cache-control'] == 'no-store'
@@ -151,7 +152,7 @@ assert 'image/svg+xml' in client.get(cash_url+'/qr').headers['content-type']
 client.cookies.set(core.USER_COOKIE,core.make_session(other))
 assert client.get(cash_url).status_code == 404
 assert client.get(cash_url+'/qr').status_code == 404
-client.cookies.set(core.USER_COOKIE,core.make_session(buyer))
+client.cookies.set(core.USER_COOKIE,buyer_session)
 deliver(dict(provider='wechat',event_id='cash-event',order_no=co['order_no'],transaction_id='cash-txn',amount_minor=9900,currency='CNY'))
 assert client.get(cash_url+'/qr').status_code == 409
 with site.db() as conn:

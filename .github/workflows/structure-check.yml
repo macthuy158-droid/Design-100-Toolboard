@@ -34,7 +34,7 @@ jobs:
         run: python scripts/check_business_rules.py
       - name: Check streaming upload storage
         env: *test_env
-        run: python scripts/check_upload_storage.py payment_core.py scripts/check_payments.py
+        run: python scripts/check_upload_storage.py
       - name: Check payment settlement security
         env: *test_env
         run: python scripts/check_payments.py
