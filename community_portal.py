@@ -91,7 +91,7 @@ def registration_page(internal=False, error='', values=None, status_code=200):
     closed = not internal and not GUEST_SIGNUP_OPEN
     if closed:
         notice += '<div class="signup-error" role="status">公开注册暂未开放，请稍后再试。</div>'
-    secondary = '<a href="/account/register">← 返回普通账号注册</a>' if internal else '<a href="/account/register/internal">院内人员注册 →</a>'
+    secondary = '<a href="/account/register">← 返回普通账号注册</a>' if internal else '<a class="signup-internal-btn" href="/account/register/internal">院内人员注册 <span aria-hidden="true">→</span></a><small class="signup-internal-hint">需管理员提供的邀请码</small>'
     role = core.ROLE_XIAOFEIXIA if internal else core.ROLE_XIAOYOUXIA
     body = f'''<style>
 .signup-shell{{width:min(440px,calc(100% - 32px));margin:64px auto 80px}}
@@ -102,6 +102,7 @@ def registration_page(internal=False, error='', values=None, status_code=200):
 .signup-card input:focus{{outline:2px solid #777;outline-offset:2px}}.signup-card small{{display:block;color:#888;font-size:11px;margin-top:6px}}
 .signup-submit{{width:100%;justify-content:center;margin-top:6px}}.signup-login{{font-size:12px;text-align:center;color:#777;margin:22px 0 0}}
 .signup-login a{{color:#111;text-decoration:underline}}.signup-secondary{{border-top:1px solid #eee;margin-top:24px;padding-top:20px;text-align:center;font-size:12px;color:#777}}
+.signup-internal-btn{{display:flex;align-items:center;justify-content:center;gap:10px;box-sizing:border-box;width:100%;min-height:44px;background:#f2f3ef;border:1px solid #b9bdb2;border-radius:12px;color:#222;font-size:13px;font-weight:650}}.signup-internal-btn:hover{{background:#e9ece4;border-color:#7b8471}}.signup-internal-btn:focus-visible{{outline:2px solid #555;outline-offset:3px}}.signup-internal-hint{{margin-top:9px!important;font-size:11px;color:#888}}
 .signup-error{{background:#fff0ee;border:1px solid #f2d2cd;padding:12px;border-radius:10px;font-size:12px;line-height:1.6;margin:16px 0}}
 @media(max-width:520px){{.signup-shell{{margin-top:28px}}.signup-card{{padding:24px}}}}
 </style><main class="signup-shell"><div class="signup-card"><div class="eyebrow">DESIGN 100%</div><h1>{title}</h1><p class="signup-intro">{intro}</p>{notice}
