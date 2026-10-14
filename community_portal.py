@@ -110,7 +110,7 @@ def registration_page(internal=False, error='', values=None, status_code=200):
 <div class="field"><label for="signup-password">密码</label><input id="signup-password" name="password" type="password" autocomplete="new-password" minlength="6" required><small>至少 6 位。</small></div>
 <div class="field"><label for="confirm-password">确认密码</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="6" required></div>
 <button class="btn signup-submit" {'disabled' if closed else ''}>{'认证并注册' if internal else '注册'}</button></form>
-<p class="signup-login">已有账号？ <a href="/account/login">登录</a></p><div class="signup-secondary">{secondary}</div></div></main>'''
+<div class="signup-secondary">{secondary}</div><p class="signup-login">已有账号？ <a href="/account/login">登录</a></p></div></main>'''
     return HTMLResponse(page(body, title + ' · 小飞侠设计100%'), status_code=status_code)
 
 
