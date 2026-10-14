@@ -24,14 +24,14 @@ try:
     raise AssertionError('Unknown login username must not be bound')
 except ValueError:
     pass
-bound,username,_=grant(site.DB_PATH,'Unified Admin Fixture',Path(os.environ['TOOLBOARD_DATA_DIR'])/'backups')
+bound,username,_=grant(site.DB_PATH,'Unified Admin Fixture',Path(os.environ['TOOLBOARD_DATA_DIR'])/'backups',superadmin=True)
 assert bound==uid and username=='Unified Admin Fixture'
 grant(site.DB_PATH,'Unified Admin Fixture',Path(os.environ['TOOLBOARD_DATA_DIR'])/'backups')
 with site.db() as c:
     user=c.execute('SELECT * FROM community_users WHERE id=?',(uid,)).fetchone()
     assert core.is_admin(user) and user['password_hash']==digest
     assert not core.is_admin(c.execute('SELECT * FROM community_users WHERE id=?',(other,)).fetchone())
-    assert c.execute('SELECT COUNT(*) FROM admin_access_events WHERE user_id=?',(uid,)).fetchone()[0]==1
+    assert c.execute("SELECT COUNT(*) FROM admin_access_events WHERE user_id=? AND action='grant'",(uid,)).fetchone()[0]==1
 
 anonymous=TestClient(app,base_url='https://testserver')
 assert anonymous.get('/manage/',follow_redirects=False).headers['location'].startswith('/account/login')
