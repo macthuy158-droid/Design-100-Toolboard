@@ -175,6 +175,7 @@ assert result.status_code == 200 and 'cash-txn' in result.text
 with site.db() as conn:
     conn.execute('UPDATE community_users SET is_admin=0,finance_enabled=0 WHERE id=?',(owner,))
 client.cookies.set(core.USER_COOKIE,core.make_session(buyer))
+csrf = re.search(r'name="csrf" value="([a-f0-9]+)"', client.get('/account/me').text).group(1)
 # Legacy points-only tools stay protected, while new zero-cash tools are free.
 with site.db() as conn:
     legacy = add_tool(conn,'points-legacy',owner,coin_price=50)
