@@ -268,7 +268,11 @@ def can_download(conn, user, tool):
         return False
     if coin_core.is_owner(tool, user['id']):
         return True
-    if coin_core.coin_price(tool) <= 0:
+    legacy_coin_only = 'legacy_coin_only' in tool.keys() and bool(tool['legacy_coin_only'])
+    if int(tool['price_cents'] or 0) <= 0 and not legacy_coin_only:
+        return True
+    import payment_core
+    if payment_core.has_access(conn, user['id'], 'tool', tool['id']):
         return True
     if coin_core.has_access(conn, user['id'], tool['id']):
         return True
@@ -384,10 +388,16 @@ def add_xiaofeixia(name: str, password: str = ""):
 
 def grant_order(order_id: int):
     with site.db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
         if not order:
             return False
         if int(order['amount_cents'] or 0) <= 0:
+            return False
+        if order['status'] == 'paid':
+            return True
+        # Do not overwrite online transactions or resurrect closed orders.
+        if order['status'] != 'pending' or order['provider'] not in ('', 'manual'):
             return False
         stamp = now()
         conn.execute("UPDATE orders SET status='paid',provider='manual',paid_at=? WHERE id=?", (stamp,order_id))

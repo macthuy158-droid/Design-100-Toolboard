@@ -66,7 +66,7 @@ def main():
         off_id = add_user(conn, token + "-off", active=0)
 
         free_id = add_tool(conn, f"ci-free-{token}", owner_id, coin_price=0)
-        paid_id = add_tool(conn, f"ci-paid-{token}", owner_id, coin_price=30)
+        paid_id = add_tool(conn, f"ci-paid-{token}", owner_id, coin_price=30, price_cents=1000)
 
         owner = row(conn, "community_users", owner_id)
         buyer = row(conn, "community_users", buyer_id)

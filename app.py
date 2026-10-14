@@ -37,6 +37,9 @@ bounty_portal.init_db()
 course_portal.init_db()
 coin_core.init_db()
 
+import payment_core  # noqa: E402
+payment_core.init_db()
+
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
 HERO_TITLE = "Desgin 100%"
@@ -144,6 +147,7 @@ app.include_router(bbs_portal.router)
 app.include_router(bounty_portal.router)
 app.include_router(course_portal.router)
 app.include_router(toolboard_portal.router)
+app.include_router(payment_core.router)
 
 _original_admin_page = admin_portal.admin_page
 

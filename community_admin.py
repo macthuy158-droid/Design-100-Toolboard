@@ -31,9 +31,10 @@ def admin_nav(active=""):
     <a class="btn secondary" href="/manage/tools/">工具管理</a>
     <a class="btn {'secondary' if active!='users' else ''}" href="/manage/community/users">用户管理</a>
     <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
-    <a class="btn {'secondary' if active!='coins' else ''}" href="/manage/community/coins">币值管理</a>
+    <a class="btn {'secondary' if active!='coins' else ''}" href="/manage/community/coins">社区积分管理</a>
     <a class="btn {'secondary' if active!='bbs' else ''}" href="/manage/community/bbs">BBS 管理</a>
     <a class="btn secondary" href="/manage/courses/">课程管理</a>
+    <a class="btn secondary" href="/manage/community/purchases">现金订单</a>
     </div>'''
 
 
@@ -133,11 +134,11 @@ def coins_page(request: Request):
     led=''.join(f'''<tr><td>{site.esc(r['display_name'])}</td><td>{site.esc(coin_core.REASON_LABELS.get(r['reason'],r['reason']))}</td>
     <td>{site.esc(r['note'] or '—')}</td><td>{'+' if int(r['delta'])>0 else ''}{int(r['delta'])}</td>
     <td class="muted">{site.esc((r['created_at'] or '')[:16].replace('T',' '))}</td></tr>''' for r in recent) or '<tr><td colspan="5">暂无流水</td></tr>'
-    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>币值管理</h1><div class="muted">注册赠送 {coin_core.REGISTER_BONUS} 个，发布工具审核通过再得 {coin_core.PUBLISH_REWARD} 个。这里可人工充值或扣减：正数为充值，负数为扣减。</div></div>{admin_nav('coins')}</div>
+    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>社区积分管理</h1><div class="muted">注册赠送 {coin_core.REGISTER_BONUS} 个，发布工具审核通过再得 {coin_core.PUBLISH_REWARD} 个。这里可人工奖励或扣减：正数为奖励，负数为扣减。</div></div>{admin_nav('coins')}</div>
     <div class="summary"><div class="stat"><b>{total}</b><span>流通中{coin_core.COIN_NAME}</span></div><div class="stat"><b>{len(rows)}</b><span>启用账号</span></div></div>
-    <div class="card table-wrap"><h2>用户余额</h2><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>余额</th><th>充值 / 扣减</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="4">暂无用户</td></tr>'}</tbody></table></div>
+    <div class="card table-wrap"><h2>用户余额</h2><table class="table"><thead><tr><th>姓名 / 账号</th><th>身份</th><th>余额</th><th>奖励 / 扣减</th></tr></thead><tbody>{''.join(rows) if rows else '<tr><td colspan="4">暂无用户</td></tr>'}</tbody></table></div>
     <div class="card table-wrap"><h2>最近流水</h2><table class="table"><thead><tr><th>用户</th><th>类型</th><th>说明</th><th>变动</th><th>时间</th></tr></thead><tbody>{led}</tbody></table></div></div>'''
-    return HTMLResponse(page(body, '币值管理 · 小飞侠设计100%'))
+    return HTMLResponse(page(body, '社区积分管理 · 小飞侠设计100%'))
 
 
 @app.post('/coins/{user_id}/adjust')
@@ -275,7 +276,7 @@ def approve(request: Request, submission_id: int):
             raise HTTPException(400, "投稿类型无效。")
 
         sub_price=int((s['feixia_coin_price'] if 'feixia_coin_price' in s.keys() else 0) or 0)
-        conn.execute("UPDATE tools SET feixia_coin_price=? WHERE id=?",(sub_price,tool_id))
+        conn.execute("UPDATE tools SET feixia_coin_price=?,legacy_coin_only=0 WHERE id=?",(sub_price,tool_id))
         coin_core.grant_publish_reward(conn, s['user_id'], submission_id, tool_id, note=s['name'] or s['slug'])
 
         if is_web:
@@ -384,3 +385,26 @@ def pin_bbs_post(request: Request, post_id: int):
         conn.execute("UPDATE bbs_posts SET pinned=? WHERE id=?",
                      (0 if int(row['pinned'] or 0) else 1, post_id))
     return RedirectResponse('/manage/community/bbs', 303)
+
+
+@app.get('/purchases', response_class=HTMLResponse)
+def purchases_page(request: Request, offset: int = 0):
+    require_admin(request)
+    import payment_core
+    offset = max(0, offset)
+    with site.db() as conn:
+        orders = conn.execute('''SELECT o.*,u.display_name FROM purchase_orders o
+            JOIN community_users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 50 OFFSET ?''', (offset,)).fetchall()
+        totals = conn.execute("SELECT currency,COUNT(*) n,SUM(amount_cents) total FROM purchase_orders WHERE status='paid' GROUP BY currency").fetchall()
+    rows = ''.join(f'''<tr><td>{site.esc(o['order_no'])}</td><td>{site.esc(o['display_name'])}</td>
+        <td>{'工具' if o['product_type']=='tool' else '课程'} · {site.esc(o['product_name'])}</td>
+        <td>{site.esc(o['currency'])} {o['amount_cents']/100:.2f}</td>
+        <td>{site.esc(payment_core.STATUS_LABELS.get(o['status'], o['status']))}</td>
+        <td>{site.esc(o['provider'] or '—')}</td><td>{site.esc(o['provider_txn'] or '—')}</td></tr>''' for o in orders)
+    stats = ''.join(f'<div class="stat"><b>{site.esc(t["currency"])} {t["total"]/100:.2f}</b><span>{t["n"]} 笔已付款 · 销售总额</span></div>' for t in totals)
+    pagination = (f'<a class="btn secondary" href="/manage/community/purchases?offset={max(0,offset-50)}">上一页</a>' if offset else '')
+    if len(orders) == 50:
+        pagination += f'<a class="btn secondary" href="/manage/community/purchases?offset={offset+50}">下一页</a>'
+    body = f'''<div class="wrap"><div class="top"><div><h1>现金订单</h1><p class="muted">工具与课程购买记录。销售总额未扣手续费，也未向开发者结算。</p></div>{admin_nav('purchases')}</div>
+        <div class="summary">{stats}</div><div class="card table-wrap"><table class="table"><thead><tr><th>订单号</th><th>购买人</th><th>商品</th><th>金额</th><th>状态</th><th>渠道</th><th>支付交易号</th></tr></thead><tbody>{rows or '<tr><td colspan="7">暂无现金订单</td></tr>'}</tbody></table></div><div class="actions">{pagination}</div></div>'''
+    return HTMLResponse(page(body, '现金订单 · 小飞侠设计100%'), headers={'Cache-Control': 'no-store'})
