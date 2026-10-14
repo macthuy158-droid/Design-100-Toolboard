@@ -33,6 +33,7 @@ def admin_nav(active=""):
     <a class="btn {'secondary' if active!='invites' else ''}" href="/manage/community/invites">邀请码</a>
     <a class="btn {'secondary' if active!='coins' else ''}" href="/manage/community/coins">历史积分记录</a>
     <a class="btn {'secondary' if active!='bbs' else ''}" href="/manage/community/bbs">BBS 管理</a>
+    <a class="btn secondary" href="/manage/community/developer-applications">开发者申请</a>
     <a class="btn secondary" href="/manage/courses/">课程管理</a>
     <a class="btn secondary" href="/manage/community/purchases">现金订单</a>
     </div>'''
@@ -83,7 +84,7 @@ def review_center(request: Request):
 
     recent_rows=''.join(f'''<tr><td>{site.esc(s['display_name'])}</td><td>{site.esc(s['name'] or s['slug'])}</td><td>{'新工具' if s['submission_type']=='new_tool' else '版本更新'}</td><td>v{site.esc(s['version'])}</td><td><span class="badge {'ok' if s['status']=='approved' else 'off'}">{'已通过' if s['status']=='approved' else '已驳回'}</span></td></tr>''' for s in recent) or '<tr><td colspan="5">暂无历史审核记录</td></tr>'
 
-    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>投稿审核</h1><div class="muted">这里只处理小飞侠提交的新工具和版本更新。</div></div>{admin_nav('review')}</div>
+    body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>投稿审核</h1><div class="muted">这里只处理开发者提交的新工具和版本更新。</div></div>{admin_nav('review')}</div>
     <div class="summary"><div class="stat"><b>{len(pending)}</b><span>待审核</span></div></div>
     {''.join(items) if items else '<div class="card empty">当前没有待审核投稿。</div>'}
     <div class="section-title">最近审核记录</div><div class="card table-wrap"><table class="table"><thead><tr><th>开发者</th><th>工具</th><th>类型</th><th>版本</th><th>结果</th></tr></thead><tbody>{recent_rows}</tbody></table></div></div>'''
@@ -104,7 +105,7 @@ def users_page(request: Request):
         state='<span class="badge ok">启用</span>' if u['active'] else '<span class="badge off">停用</span>'
         toggle='停用' if u['active'] else '启用'
         reset=f'<form action="/manage/community/users/{u["id"]}/reset-password" method="post" onsubmit="return confirm(\'确定将密码重置为姓名吗？\')"><button class="btn secondary mini">重置密码</button></form>' if u['role']==core.ROLE_XIAOFEIXIA else ''
-        rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td><td>{core.role_label(u['role'])}</td><td>{site.esc(u['email'] or '院内账号')}</td><td>{state}</td><td><div class="actions"><form action="/manage/community/users/{u['id']}/toggle" method="post"><button class="btn secondary mini">{toggle}</button></form>{reset}</div></td></tr>''')
+        rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td><td>{core.user_label(u)}</td><td>{site.esc(u['email'] or '院内账号')}</td><td>{state}</td><td><div class="actions"><form action="/manage/community/users/{u['id']}/toggle" method="post"><button class="btn secondary mini">{toggle}</button></form>{reset}</div></td></tr>''')
 
     body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>用户管理</h1><div class="muted">只管理账号，不在这里处理工具和投稿。</div></div>{admin_nav('users')}</div>
     <div class="summary"><div class="stat"><b>{xfx}</b><span>小飞侠</span></div><div class="stat"><b>{xyx}</b><span>小游侠</span></div></div>
@@ -125,7 +126,7 @@ def coins_page(request: Request):
             bal=coin_core.balance(conn,u['id'])
             total+=bal
             rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td>
-            <td>{core.role_label(u['role'])}</td><td><b>{bal}</b> {coin_core.COIN_NAME}</td>
+            <td>{core.user_label(u)}</td><td><b>{bal}</b> {coin_core.COIN_NAME}</td>
             <td>只读存档</td></tr>''')
         recent=conn.execute("SELECT l.*,u.display_name FROM coin_ledger l JOIN community_users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 30").fetchall()
     led=''.join(f'''<tr><td>{site.esc(r['display_name'])}</td><td>{site.esc(coin_core.REASON_LABELS.get(r['reason'],r['reason']))}</td>
@@ -392,3 +393,48 @@ def purchases_page(request: Request, offset: int = 0):
     body = f'''<div class="wrap"><div class="top"><div><h1>现金订单</h1><p class="muted">工具与课程购买记录。销售总额未扣手续费，也未向开发者结算。</p></div>{admin_nav('purchases')}</div>
         <div class="summary">{stats}</div><div class="card table-wrap"><table class="table"><thead><tr><th>订单号</th><th>购买人</th><th>商品</th><th>金额</th><th>状态</th><th>渠道</th><th>支付交易号</th></tr></thead><tbody>{rows or '<tr><td colspan="7">暂无现金订单</td></tr>'}</tbody></table></div><div class="actions">{pagination}</div></div>'''
     return HTMLResponse(page(body, '现金订单 · 小飞侠设计100%'), headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/developer-applications', response_class=HTMLResponse)
+def developer_applications(request: Request):
+    import payment_core
+    require_admin(request)
+    core.init_db()
+    with site.db() as conn:
+        applications = conn.execute('''SELECT a.*,u.display_name,u.email,u.active
+            FROM developer_applications a JOIN community_users u ON u.id=a.user_id
+            ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END,a.id DESC''').fetchall()
+    rows = []
+    labels = {'pending': '待审核', 'approved': '已通过', 'rejected': '未通过'}
+    token = payment_core.csrf_token(request, admin=True)
+    for a in applications:
+        action = ''
+        if a['status'] == 'pending':
+            action = f'''<form action="/manage/community/developer-applications/{a['id']}/review" method="post"><input type="hidden" name="csrf" value="{token}"><div class="field"><label>审核备注</label><input name="note" maxlength="500"></div><div class="actions"><button class="btn" name="decision" value="approved">通过</button><button class="btn secondary" name="decision" value="rejected">不通过</button></div></form>'''
+        rows.append(f'''<div class="card"><span class="badge">{labels[a['status']]}</span><h2>{site.esc(a['display_name'])}</h2><p class="muted">{site.esc(a['email'] or '院内账号')} · {'账号启用' if a['active'] else '账号停用'}</p><div class="review-note">{site.esc(a['proposal'])}</div><p>{site.esc(a['review_note'])}</p>{action}</div>''')
+    body = f'''<div class="wrap"><div class="top"><div><h1>开发者申请</h1><p class="muted">通过后允许发布工具。账号仍保留普通用户身份，不获得院内免费课程权益。</p></div>{admin_nav('developers')}</div>{''.join(rows) or '<div class="card empty">暂无申请。</div>'}</div>'''
+    return HTMLResponse(page(body, '开发者申请 · 小飞侠设计100%'))
+
+
+@app.post('/developer-applications/{application_id}/review')
+def review_developer(request: Request, application_id: int, decision: str = Form(...),
+                     note: str = Form(''), csrf: str = Form('')):
+    import os
+    import payment_core
+    require_admin(request)
+    payment_core.check_csrf(request, csrf, admin=True)
+    if decision not in ('approved', 'rejected') or len(note) > 500:
+        raise HTTPException(400, '审核参数不正确。')
+    with site.db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        application = conn.execute("SELECT * FROM developer_applications WHERE id=? AND status='pending'", (application_id,)).fetchone()
+        if not application:
+            raise HTTPException(409, '申请不存在或已审核。')
+        user = conn.execute('SELECT * FROM community_users WHERE id=?', (application['user_id'],)).fetchone()
+        if not user or not user['active']:
+            raise HTTPException(409, '账号已停用，不能审核申请。')
+        if decision == 'approved':
+            conn.execute('UPDATE community_users SET developer_enabled=1,updated_at=? WHERE id=?', (core.now(), user['id']))
+        conn.execute('''UPDATE developer_applications SET status=?,review_note=?,reviewed_by=?,reviewed_at=? WHERE id=?''',
+                     (decision, note.strip(), os.getenv('TOOLBOARD_ADMIN_USERNAME', 'admin'), core.now(), application_id))
+    return RedirectResponse('/manage/community/developer-applications', 303)

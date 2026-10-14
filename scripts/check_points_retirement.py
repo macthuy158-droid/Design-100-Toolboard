@@ -53,11 +53,11 @@ with site.db() as c:
 # Both actual registration flows create users without minting points.
 with patch('community_portal.GUEST_SIGNUP_OPEN',True):
     r=client.post('/account/register',data={'role':'xiaoyouxia','email':'retire-new@example.test',
-                  'display_name':'New member','password':'offline-test-password'},follow_redirects=False)
+                  'display_name':'New member','password':'offline-test-password','confirm_password':'offline-test-password'},follow_redirects=False)
     assert r.status_code==303
 invite,_=core.create_invite('Retirement Invite')
 r=client.post('/account/register',data={'role':'xiaofeixia','real_name':'Retirement Invite',
-              'invite_code':invite,'password':'offline-test-password'},follow_redirects=False)
+              'invite_code':invite,'password':'offline-test-password','confirm_password':'offline-test-password'},follow_redirects=False)
 assert r.status_code==303
 with site.db() as c:
     ids=[r[0] for r in c.execute("SELECT id FROM community_users WHERE username IN ('retire-new@example.test','Retirement Invite')")]

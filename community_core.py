@@ -225,6 +225,21 @@ def init_db():
             conn.execute("ALTER TABLE tools ADD COLUMN tool_type TEXT NOT NULL DEFAULT 'desktop'")
         if 'app_url' not in cols:
             conn.execute("ALTER TABLE tools ADD COLUMN app_url TEXT NOT NULL DEFAULT ''")
+        user_cols = {r['name'] for r in conn.execute("PRAGMA table_info(community_users)")}
+        if 'developer_enabled' not in user_cols:
+            conn.execute("ALTER TABLE community_users ADD COLUMN developer_enabled INTEGER NOT NULL DEFAULT 0")
+        conn.executescript('''CREATE TABLE IF NOT EXISTS developer_applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES community_users(id),
+            proposal TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+            review_note TEXT NOT NULL DEFAULT '',
+            reviewed_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_developer_pending
+        ON developer_applications(user_id) WHERE status='pending';''')
         _migrate_legacy_slugs(conn)
         _backfill_legacy_tool_owners(conn)
         _install_submission_guards(conn)
@@ -255,8 +270,21 @@ def role_label(role: str):
     return "小飞侠" if role == ROLE_XIAOFEIXIA else "小游侠"
 
 
+def is_developer(user):
+    return bool(user and user['active'] and (
+        user['role'] == ROLE_XIAOFEIXIA
+        or ('developer_enabled' in user.keys() and user['developer_enabled'])
+    ))
+
+
+def user_label(user):
+    if user['role'] == ROLE_XIAOFEIXIA:
+        return '院内开发者'
+    return '开发者' if is_developer(user) else '普通用户'
+
+
 def is_tool_owner(tool, user):
-    if not tool or not user or user['role'] != ROLE_XIAOFEIXIA:
+    if not tool or not is_developer(user):
         return False
     owner = tool['owner_user_id']
     return owner is not None and int(owner) == int(user['id'])
