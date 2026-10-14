@@ -259,7 +259,7 @@ def gateway_checkout(order):
     from urllib.error import URLError
     secret = os.environ['PAY100_BRIDGE_SECRET']
     data = dict(order_no=order['order_no'], amount_minor=order['amount_cents'], currency=order['currency'],
-                description=order['product_name'][:80], provider='wechat')
+                description=order['product_name'].encode('utf-8')[:127].decode('utf-8', errors='ignore'), provider='wechat')
     body = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode()
     timestamp = str(int(time.time()))
     signature = hmac.new(secret.encode(), timestamp.encode() + b'\n' + body, hashlib.sha256).hexdigest()

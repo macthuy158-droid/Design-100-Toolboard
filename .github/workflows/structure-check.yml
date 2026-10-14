@@ -38,3 +38,7 @@ jobs:
       - name: Check payment settlement security
         env: *test_env
         run: python scripts/check_payments.py
+      - name: Install isolated Pay100 gateway dependencies
+        run: pip install -r pay100_gateway/requirements.txt
+      - name: Check Pay100 gateway security
+        run: python scripts/check_pay100_gateway.py
