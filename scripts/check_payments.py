@@ -159,7 +159,7 @@ with site.db() as conn:
     tool_row=conn.execute('SELECT * FROM tools WHERE id=?',(cash,)).fetchone()
     assert core.can_download(conn,buyer_row,tool_row)
     import coin_core
-    assert coin_core.purchase(conn,buyer_row,tool_row) == 0
+    assert coin_core.has_access(conn,buyer,tool_row["id"]) is False
 assert '购买成功' in client.get(cash_url).text
 assert '¥99.00' in client.get('/account/me').text
 # Verify list views and admin read access without writing real state.
@@ -177,16 +177,16 @@ with site.db() as conn:
     assert not core.can_download(conn,buyer_row,conn.execute('SELECT * FROM tools WHERE id=?',(legacy,)).fetchone())
     free = add_tool(conn,'new-free',owner,coin_price=50)
     assert core.can_download(conn,buyer_row,conn.execute('SELECT * FROM tools WHERE id=?',(free,)).fetchone())
-    assert coin_core.purchase(conn,buyer_row,conn.execute('SELECT * FROM tools WHERE id=?',(free,)).fetchone()) == 0
-# An active cash checkout blocks concurrent points redemption.
+    assert not coin_core.has_access(conn,buyer,free)
+# Retired points cannot be redeemed, including during a cash checkout.
 with site.db() as conn:
     exchange = add_tool(conn,'exchange-both',owner,coin_price=10,price_cents=2500)
-    coin_core.credit(conn,buyer,100,'admin_adjust',ref='test-award')
+    coin_core._record(conn,buyer,100,'admin_adjust',ref='historical-test-award')
 exchange_result=client.post(f'/account/purchases/new/tool/{exchange}',data={'csrf':csrf},follow_redirects=False)
 exchange_oid=int(exchange_result.headers['location'].rsplit('/',1)[1])
 with site.db() as conn:
     payments.bind_order(conn,exchange_oid,'wechat')
-assert client.post('/account/tools/exchange-both/coin-unlock',data={'csrf':csrf}).status_code == 409
+assert client.post('/account/tools/exchange-both/coin-unlock',data={'csrf':csrf}).status_code == 410
 with site.db() as conn:
     assert coin_core.balance(conn,buyer) == 100
 # Owner-only cash pricing and CSRF protections.

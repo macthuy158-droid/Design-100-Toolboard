@@ -143,63 +143,19 @@ def _record(conn, user_id, delta, reason, tool_id=None, ref="", note=""):
 
 
 def grant_register_bonus(conn, user_id, note="注册赠送"):
-    """Mint the joining bonus. The empty ref pins it to one row per account."""
-    return _record(conn, user_id, REGISTER_BONUS, "register_bonus", note=note)
-
+    """Retired: keep the signature for historical callers, mint nothing."""
+    return False
 
 def grant_publish_reward(conn, user_id, submission_id, tool_id, note=""):
-    """Mint the fixed reward for one approved submission. Idempotent."""
-    return _record(conn, user_id, PUBLISH_REWARD, "publish_reward",
-                   tool_id=tool_id, ref=str(submission_id), note=note)
-
+    """Contribution records remain in submissions; no new points are minted."""
+    return False
 
 def purchase(conn, buyer, tool):
-    """Exchange community points; never a cash sale.
-
-    Raises 409 when the tool is unpriced or the balance will not cover it.
-    Returns the amount charged; 0 means nothing was owed.
-    """
-    import community_core
-    price = coin_price(tool)
-    if community_core.can_download(conn, buyer, tool):
-        return 0
-    if is_owner(tool, buyer["id"]):
-        return 0
-    if has_access(conn, buyer["id"], tool["id"]):
-        return 0
-    if price <= 0:
-        raise HTTPException(409, f"该工具尚未设置{COIN_NAME}价格，请联系开发者或管理员。")
-
-    available = balance(conn, buyer["id"])
-    if available < price:
-        raise HTTPException(
-            409, f"{COIN_NAME}不足：需要 {price} 个，当前余额 {available} 个。"
-        )
-
-    if not _record(conn, buyer["id"], -price, "download_spend",
-                   tool_id=tool["id"], note=tool["name"]):
-        return 0  # a concurrent unlock already charged this buyer
-
-    owner = tool["owner_user_id"]
-    if owner is not None:
-        _record(conn, int(owner), price, "download_income", tool_id=tool["id"],
-                ref=str(buyer["id"]), note=f"{tool['name']} · {buyer['display_name']}")
-    return price
-
+    """Retired: old ledger entries still grant access via has_access()."""
+    raise HTTPException(410, "积分兑换已停用，请使用人民币购买。")
 
 def spend(conn, user_id, amount, reason, ref="", note=""):
-    """Debit a balance, refusing to go negative. Used for bounty escrow."""
-    amount = int(amount)
-    if amount <= 0:
-        return 0
-    available = balance(conn, user_id)
-    if available < amount:
-        raise HTTPException(
-            409, f"{COIN_NAME}不足：需要 {amount} 个，当前余额 {available} 个。"
-        )
-    _record(conn, user_id, -amount, reason, ref=ref or now(), note=note)
-    return amount
-
+    raise HTTPException(410, "积分支出已停用。")
 
 def credit(conn, user_id, amount, reason, ref="", note=""):
     """Credit a balance — a bounty refund or payout."""
@@ -211,8 +167,7 @@ def credit(conn, user_id, amount, reason, ref="", note=""):
 
 
 def adjust(conn, user_id, delta, note=""):
-    """Administrative top-up or correction. Timestamped so repeats are allowed."""
-    return _record(conn, user_id, int(delta), "admin_adjust", ref=now(), note=note)
+    raise HTTPException(410, "历史积分为只读存档。")
 
 
 def recent(conn, user_id, limit=20):

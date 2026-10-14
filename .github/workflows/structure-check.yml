@@ -38,6 +38,9 @@ jobs:
       - name: Check payment settlement security
         env: *test_env
         run: python scripts/check_payments.py
+      - name: Check points retirement and legacy escrow
+        env: *test_env
+        run: python scripts/check_points_retirement.py
       - name: Install isolated Pay100 gateway dependencies
         run: pip install -r pay100_gateway/requirements.txt
       - name: Check Pay100 gateway security
