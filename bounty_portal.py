@@ -162,10 +162,10 @@ def mine(request: Request):
     if not u: return login_redirect('/bounties/mine')
     with site.db() as conn:
         own=conn.execute('''SELECT b.*,(SELECT COUNT(*) FROM bounty_responses r WHERE r.bounty_id=b.id) response_count FROM bounties b WHERE b.user_id=? ORDER BY b.id DESC''',(u['id'],)).fetchall()
-        responses=conn.execute('''SELECT r.*,b.title,b.status bounty_status FROM bounty_responses r JOIN bounties b ON b.id=r.bounty_id WHERE r.developer_user_id=? ORDER BY r.id DESC''',(u['id'],)).fetchall() if u['role']==core.ROLE_XIAOFEIXIA else []
+        responses=conn.execute('''SELECT r.*,b.title,b.status bounty_status FROM bounty_responses r JOIN bounties b ON b.id=r.bounty_id WHERE r.developer_user_id=? ORDER BY r.id DESC''',(u['id'],)).fetchall() if core.is_developer(u) else []
     own_rows=''.join(f'<tr><td><a href="/bounties/{b["id"]}">{site.esc(b["title"])}</a></td><td>{money(b)}</td><td>{site.esc(STATUSES.get(b["status"],b["status"]))}</td><td>{int(b["response_count"] or 0)}</td></tr>' for b in own) or '<tr><td colspan="4">暂无发布需求</td></tr>'
     dev=''
-    if u['role']==core.ROLE_XIAOFEIXIA:
+    if core.is_developer(u):
         rr=''.join(f'<tr><td><a href="/bounties/{r["bounty_id"]}">{site.esc(r["title"])}</a></td><td>{site.esc("已选中" if r["status"]=="accepted" else "已提交")}</td><td>{site.esc(STATUSES.get(r["bounty_status"],r["bounty_status"]))}</td></tr>' for r in responses) or '<tr><td colspan="3">暂无响应</td></tr>'
         dev=f'<div class="panel"><h2>我响应的需求</h2><table class="table"><thead><tr><th>需求</th><th>方案状态</th><th>需求状态</th></tr></thead><tbody>{rr}</tbody></table></div>'
     body=f'<div class="bw"><div class="bh"><div><div class="ey">MY BOUNTIES</div><h1>我的需求</h1></div><div class="actions"><a class="btn secondary" href="/bounties">需求广场</a></div></div><div class="panel"><h2>我发布的需求</h2><table class="table"><thead><tr><th>需求</th><th>悬赏</th><th>状态</th><th>响应</th></tr></thead><tbody>{own_rows}</tbody></table></div>{dev}</div>'
@@ -179,7 +179,7 @@ def detail(request: Request,bounty_id: int):
         b=conn.execute('SELECT b.*,u.display_name FROM bounties b JOIN community_users u ON u.id=b.user_id WHERE b.id=?',(bounty_id,)).fetchone()
         if not b: raise HTTPException(404,'需求不存在。')
         rs=conn.execute('SELECT r.*,u.display_name FROM bounty_responses r JOIN community_users u ON u.id=r.developer_user_id WHERE r.bounty_id=? ORDER BY CASE r.status WHEN "accepted" THEN 0 ELSE 1 END,r.id DESC',(bounty_id,)).fetchall()
-    owner=bool(u and int(u['id'])==int(b['user_id'])); own=next((r for r in rs if u and int(r['developer_user_id'])==int(u['id'])),None); can=bool(u and u['role']==core.ROLE_XIAOFEIXIA and not owner and b['status']=='open')
+    owner=bool(u and int(u['id'])==int(b['user_id'])); own=next((r for r in rs if u and int(r['developer_user_id'])==int(u['id'])),None); can=bool(core.is_developer(u) and not owner and b['status']=='open')
     ref=f'<p><a href="{site.esc(b["reference_url"])}" target="_blank" rel="noopener noreferrer">打开参考链接 ↗</a></p>' if b['reference_url'] else ''
     items=[]
     for r in (rs if owner else ([own] if own else [])):
@@ -213,7 +213,7 @@ def detail(request: Request,bounty_id: int):
 def respond(request: Request,bounty_id: int,proposal: str=Form(...),estimated_days: int=Form(...),quote_coins: int=Form(0)):
     init_db(); u=user(request)
     if not u: return login_redirect(f'/bounties/{bounty_id}')
-    if u['role']!=core.ROLE_XIAOFEIXIA: raise HTTPException(403,'只有小飞侠开发者可以响应悬赏需求。')
+    if not core.is_developer(u): raise HTTPException(403,'只有开发者可以响应历史悬赏需求。')
     proposal=proposal.strip()
     if not proposal or len(proposal)>5000: raise HTTPException(400,'方案说明不能为空，且最多 5000 字。')
     if estimated_days<1 or estimated_days>365: raise HTTPException(400,'预计周期需在 1—365 天之间。')

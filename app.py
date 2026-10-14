@@ -68,7 +68,7 @@ SESSION_UI = r'''
           login.title = '进入个人中心';
         }
         if (register) register.remove();
-        if (developer && state.role !== 'xiaofeixia') developer.remove();
+        if (developer && !state.can_publish) developer.remove();
       });
     } catch (_) {}
   }
@@ -137,7 +137,8 @@ def account_session(request: Request):
         "authenticated": True,
         "display_name": user["display_name"],
         "role": user["role"],
-        "role_label": "小飞侠" if user["role"] == "xiaofeixia" else "",
+        "role_label": community_core.user_label(user),
+        "can_publish": community_core.is_developer(user),
     }
 
 

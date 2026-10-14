@@ -56,8 +56,8 @@ def install_streaming_submit(router):
         user = core.current_user(request)
         if not user:
             raise HTTPException(status_code=401, detail="请先登录。")
-        if user["role"] != core.ROLE_XIAOFEIXIA:
-            raise HTTPException(status_code=403, detail="只有小飞侠开发者可以发布工具。")
+        if not core.is_developer(user):
+            raise HTTPException(status_code=403, detail="只有已获资格的开发者可以发布工具。")
 
         clean_version = version.strip()
         if not clean_version:
