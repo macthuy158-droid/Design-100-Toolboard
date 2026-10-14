@@ -214,6 +214,12 @@ def toggle_user(request: Request, user_id: int):
         conn.execute('BEGIN IMMEDIATE')
         u=conn.execute("SELECT * FROM community_users WHERE id=?", (user_id,)).fetchone()
         if not u: raise HTTPException(404, "用户不存在。")
+        import admin_management
+        actor=core.current_user(request)
+        if u['is_admin'] and not admin_management.superadmin(actor):
+            raise HTTPException(403, '只有主管理员可以管理管理员账号。')
+        if u['active'] and u['is_superadmin'] and conn.execute('SELECT COUNT(*) FROM community_users WHERE active=1 AND is_admin=1 AND is_superadmin=1').fetchone()[0] <= 1:
+            raise HTTPException(409, '至少保留一个启用的主管理员。')
         if u['active'] and core.is_admin(u) and conn.execute('SELECT COUNT(*) FROM community_users WHERE active=1 AND is_admin=1').fetchone()[0] <= 1:
             raise HTTPException(409, '至少保留一个可登录的管理员账号。')
         conn.execute("UPDATE community_users SET active=?,updated_at=? WHERE id=?", (0 if u['active'] else 1, core.now(), user_id))
@@ -226,7 +232,7 @@ def reset_password(request: Request, user_id: int):
     with site.db() as conn:
         u=conn.execute("SELECT * FROM community_users WHERE id=? AND role=?", (user_id, core.ROLE_XIAOFEIXIA)).fetchone()
         if not u: raise HTTPException(404, "小飞侠用户不存在。")
-        if core.is_admin(u):
+        if u['is_admin']:
             raise HTTPException(409, '管理员不能使用姓名重置密码。')
         salt,digest=core.hash_password(u['display_name'])
         conn.execute("UPDATE community_users SET password_salt=?,password_hash=?,updated_at=? WHERE id=?", (salt,digest,core.now(),user_id))
@@ -379,7 +385,8 @@ def pin_bbs_post(request: Request, post_id: int):
 
 @app.get('/purchases', response_class=HTMLResponse)
 def purchases_page(request: Request, offset: int = 0):
-    require_admin(request)
+    import admin_management
+    admin_management.require(request, 'finance')
     import payment_core
     offset = max(0, offset)
     with site.db() as conn:

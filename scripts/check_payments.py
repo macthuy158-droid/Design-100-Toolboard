@@ -167,9 +167,14 @@ assert client.get('/courses').status_code == 200
 assert '¥123.45' in client.get('/courses').text
 assert client.get('/tools').status_code == 200
 assert client.get('/manage/community/purchases', follow_redirects=False).status_code in (303,401,403)
-with patch('admin_portal.require_admin', return_value=None):
-    result=client.get('/manage/community/purchases')
-    assert result.status_code == 200 and 'cash-txn' in result.text
+with site.db() as conn:
+    conn.execute('UPDATE community_users SET is_admin=1,finance_enabled=1 WHERE id=?',(owner,))
+client.cookies.set(core.USER_COOKIE,core.make_session(owner))
+result=client.get('/manage/community/purchases')
+assert result.status_code == 200 and 'cash-txn' in result.text
+with site.db() as conn:
+    conn.execute('UPDATE community_users SET is_admin=0,finance_enabled=0 WHERE id=?',(owner,))
+client.cookies.set(core.USER_COOKIE,core.make_session(buyer))
 # Legacy points-only tools stay protected, while new zero-cash tools are free.
 with site.db() as conn:
     legacy = add_tool(conn,'points-legacy',owner,coin_price=50)

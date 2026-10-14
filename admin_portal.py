@@ -128,7 +128,14 @@ async def protect_admin_posts(request: Request, call_next):
             payment_core.check_csrf(request, token, admin=True)
         except HTTPException as error:
             return JSONResponse({'detail':error.detail}, status_code=error.status_code)
-    return await call_next(request)
+    response = await call_next(request)
+    if request.method in ('POST','PUT','PATCH','DELETE'):
+        user=core.current_user(request)
+        if core.is_admin(user):
+            import admin_management
+            with db() as conn:
+                admin_management.audit(conn,user,'admin.request',request.url.path,{'method':request.method,'http_status':response.status_code})
+    return response
 
 
 @app.exception_handler(HTTPException)
@@ -155,8 +162,16 @@ def dashboard(request: Request):
     <a class="entry" href="/manage/tools/"><b>{tools}</b><h2>工具管理</h2><p>修改资料、价格、上下架，查看版本历史。</p></a>
     <a class="entry" href="/manage/community/users"><b>{users}</b><h2>用户管理</h2><p>管理小飞侠与小游侠账号。</p></a>
     <a class="entry" href="/manage/courses/"><b>{courses}</b><h2>课程管理</h2><p>创建官方设计课程，维护课时与上下架。</p></a>
-    <a class="entry" href="/manage/community/coins"><b>币</b><h2>币值管理</h2><p>查看各账号飞侠币余额，人工充值或扣减。</p></a>
+    <a class="entry" href="/manage/community/developer-applications"><b>审核</b><h2>开发者申请</h2><p>审核发布资格，查看申请说明。</p></a>
+    <a class="entry" href="/manage/community/coins"><b>历史</b><h2>历史积分记录</h2><p>仅查阅已停用积分体系的历史记录。</p></a>
     </div></div>'''
+    import admin_management
+    links=''
+    if admin_management.finance(core.current_user(request)):
+        links+='<a class="entry" href="/manage/revenue"><h2>收入统计</h2><p>年度销售、退款订单与报表导出。</p></a>'
+    if admin_management.superadmin(core.current_user(request)):
+        links+='<a class="entry" href="/manage/permissions"><h2>管理员权限</h2><p>授权管理员，设置财务查看权限。</p></a><a class="entry" href="/manage/awards"><h2>年度奖金</h2><p>记录核定奖金与实际发放。</p></a><a class="entry" href="/manage/audit"><h2>操作日志</h2><p>查看权限、审核与奖金操作记录。</p></a>'
+    body=body.replace('</div></div>',links+'</div></div>')
     return HTMLResponse(admin_page(body))
 
 

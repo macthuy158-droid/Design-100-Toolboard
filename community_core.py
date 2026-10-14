@@ -228,6 +228,9 @@ def init_db():
         user_cols = {r['name'] for r in conn.execute("PRAGMA table_info(community_users)")}
         if 'is_admin' not in user_cols:
             conn.execute("ALTER TABLE community_users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+        for field in ('is_superadmin', 'finance_enabled'):
+            if field not in user_cols:
+                conn.execute(f"ALTER TABLE community_users ADD COLUMN {field} INTEGER NOT NULL DEFAULT 0")
         if 'developer_enabled' not in user_cols:
             conn.execute("ALTER TABLE community_users ADD COLUMN developer_enabled INTEGER NOT NULL DEFAULT 0")
         conn.executescript('''CREATE TABLE IF NOT EXISTS admin_access_events (

@@ -47,6 +47,9 @@ jobs:
       - name: Check unified admin authorization
         env: *test_env
         run: python scripts/check_unified_admin.py
+      - name: Check administrator permissions and annual awards
+        env: *test_env
+        run: python scripts/check_admin_management.py
       - name: Install isolated Pay100 gateway dependencies
         run: pip install -r pay100_gateway/requirements.txt
       - name: Check Pay100 gateway security

@@ -39,6 +39,8 @@ coin_core.init_db()
 
 import payment_core  # noqa: E402
 payment_core.init_db()
+import admin_management
+admin_management.init_db()
 
 BRAND_NAME = "小飞侠设计100%"
 SITE_TITLE = f"{BRAND_NAME} · 工具开发板"
