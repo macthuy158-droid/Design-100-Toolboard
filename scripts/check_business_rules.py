@@ -86,41 +86,26 @@ def main():
         assert not core.can_download(conn, off, free_tool), "deactivated account must be refused"
         assert not core.can_download(conn, None, free_tool), "anonymous must be refused"
 
-        # ---- unlocking moves credits and grants access ----
-        coin_core.adjust(conn, buyer_id, 100, "ci")
+        # Historical balances/access survive, while no new exchange or reward is possible.
+        coin_core._record(conn, buyer_id, 100, "register_bonus", note="historical fixture")
+        for attempt in (
+            lambda: coin_core.purchase(conn, buyer, paid_tool),
+            lambda: coin_core.adjust(conn, buyer_id, 100),
+            lambda: coin_core.spend(conn, buyer_id, 30, "bounty_escrow"),
+        ):
+            try:
+                attempt()
+                raise AssertionError("retired point mutation accepted")
+            except Exception as exc:
+                assert getattr(exc, "status_code", None) == 410
         assert coin_core.balance(conn, buyer_id) == 100
-        charged = coin_core.purchase(conn, buyer, paid_tool)
-        assert charged == 30, f"expected a 30 charge, got {charged}"
-        assert coin_core.balance(conn, buyer_id) == 70, "buyer must be debited"
-        assert coin_core.balance(conn, owner_id) == 30, "owner must be credited"
-        assert core.can_download(conn, buyer, paid_tool), "unlock must grant download"
-
-        # ---- unlocking is once per person per tool ----
-        assert coin_core.purchase(conn, buyer, paid_tool) == 0, "second unlock must not charge"
-        assert coin_core.balance(conn, buyer_id) == 70, "balance must not move on repeat"
-
-        # ---- a balance cannot go negative ----
-        broke = row(conn, "community_users", add_user(conn, token + "-broke"))
-        try:
-            coin_core.purchase(conn, broke, paid_tool)
-            raise AssertionError("purchase without funds must be refused")
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 409, f"expected 409, got {exc!r}"
-        assert coin_core.balance(conn, broke["id"]) == 0, "refused purchase must not debit"
-
-        # ---- publish reward is granted once per submission ----
-        assert coin_core.grant_publish_reward(conn, owner_id, 4242, paid_id)
-        after_first = coin_core.balance(conn, owner_id)
-        assert not coin_core.grant_publish_reward(conn, owner_id, 4242, paid_id), \
-            "replayed approval must not mint twice"
-        assert coin_core.balance(conn, owner_id) == after_first
-
-        # ---- joining bonus is granted once per account ----
-        assert coin_core.grant_register_bonus(conn, other_id)
-        assert coin_core.balance(conn, other_id) == coin_core.REGISTER_BONUS
-        assert not coin_core.grant_register_bonus(conn, other_id), \
-            "joining bonus must not be granted twice"
-        assert coin_core.balance(conn, other_id) == coin_core.REGISTER_BONUS
+        coin_core._record(conn, buyer_id, -30, "download_spend", tool_id=paid_id)
+        assert core.can_download(conn, buyer, paid_tool), "old exchange retains download access"
+        assert not core.can_download(conn, other, paid_tool)
+        assert not coin_core.grant_publish_reward(conn, owner_id, 4242, paid_id)
+        assert not coin_core.grant_register_bonus(conn, other_id)
+        assert coin_core.balance(conn, owner_id) == 0
+        assert coin_core.balance(conn, other_id) == 0
 
         # ---- legacy 人民币 entitlements are still honoured ----
         legacy_id = add_tool(conn, f"ci-legacy-{token}", owner_id, coin_price=50, price_cents=1000)
@@ -144,9 +129,9 @@ def main():
     print("Business rule checks passed")
     print("- Owner downloads own tool; unpriced tools are free")
     print("- Priced tools require an unlock; deactivated accounts refused")
-    print("- Unlock debits buyer, credits owner, and only charges once")
-    print("- Insufficient balance refused without debiting")
-    print("- Publish reward and joining bonus each granted once")
+    print("- Historical exchanges keep download rights")
+    print("- New point spending and adjustment refused")
+    print("- Registration and publication no longer award points")
     print("- Legacy paid entitlements still honoured")
 
 

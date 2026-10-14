@@ -233,7 +233,7 @@ def create_purchase(conn, user, product_type, product_id):
         raise HTTPException(400, '不支持该商品类型。')
     amount = int(product['price_cents'])
     if amount <= 0:
-        raise HTTPException(409, '该商品无需现金购买。')
+        raise HTTPException(409, '商品现金售价待确认，暂不接受购买。')
     existing = conn.execute("SELECT id FROM purchase_orders WHERE user_id=? AND product_type=? AND product_id=? AND status='pending'",
                             (user['id'], product_type, product_id)).fetchone()
     if existing:
@@ -377,5 +377,5 @@ def purchase_page(request: Request, order_id: int):
     extra = ''
     if order['status'] == 'pending':
         extra = f'''<script>(()=>{{let n=0;const timer=setInterval(async()=>{{if(++n>180){{clearInterval(timer);return;}}try{{const r=await fetch('/account/purchases/{order_id}/status',{{cache:'no-store'}});if(r.status===401){{clearInterval(timer);return;}}if(r.ok&&(await r.json()).status==='paid'){{clearInterval(timer);location.reload();}}}}catch(e){{}}}},5000);}})();</script>'''
-    body = f'''<div style="max-width:640px;margin:48px auto;padding:28px;background:white;border-radius:24px"><p>订单 {site.esc(order['order_no'])} · {status}</p><h1>{site.esc(order['product_name'])}</h1><h2>¥{order['amount_cents']/100:.2f}</h2><p>直接购买，无需充值飞侠币。</p>{action}<p><a href="{site.esc(target)}">返回商品</a> · <a href="/account/me">我的购买</a></p></div>'''
+    body = f'''<div style="max-width:640px;margin:48px auto;padding:28px;background:white;border-radius:24px"><p>订单 {site.esc(order['order_no'])} · {status}</p><h1>{site.esc(order['product_name'])}</h1><h2>¥{order['amount_cents']/100:.2f}</h2><p>人民币直接购买，付款后开通权益。</p>{action}<p><a href="{site.esc(target)}">返回商品</a> · <a href="/account/me">我的购买</a></p></div>'''
     return HTMLResponse(site.page(body, '订单 · 小飞侠设计100%', extra), headers={'Cache-Control': 'no-store'})

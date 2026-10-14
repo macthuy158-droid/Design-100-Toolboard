@@ -142,42 +142,18 @@ def list_bounties(request: Request, category: str='', status: str='open'):
         preview=(b['description'] or '').strip().replace('\n',' ')
         if len(preview)>92: preview=preview[:92]+'…'
         cards.append(f'''<a class="card" href="/bounties/{b['id']}"><div class="head"><div><span class="tag">{site.esc(b['category'])}</span><h2>{site.esc(b['title'])}</h2></div>{badge(b['status'])}</div><div class="desc">{site.esc(preview)}</div><div class="money">{money(b)}</div><div class="meta">悬赏金额 · 期望交付：{site.esc(b['deliverable'])}</div><div class="stats"><span>{int(b['response_count'] or 0)} 个响应</span><span>截止 {site.esc(b['deadline'] or '不限')}</span><span>{site.esc(b['display_name'])}</span></div></a>''')
-    u=user(request); primary='<a class="btn" href="/bounties/new">发布需求</a>' if u else '<a class="btn" href="/account/login?next=/bounties/new">登录后发布</a>'; mine='<a class="btn secondary" href="/bounties/mine">我的需求</a>' if u else ''
-    body=f'''<div class="bw"><div class="bh"><div><div class="ey">DESIGN 100% · BOUNTY</div><h1>需求广场</h1><div class="lead">把还没有被解决的设计工作流问题公开出来。用户发布悬赏，小飞侠提交解决方案，优秀成果可以继续沉淀为平台工具。</div></div><div class="actions">{mine}{primary}</div></div><div class="filters">{sf}</div><div class="filters">{cf}</div><div class="grid">{''.join(cards) if cards else '<div class="empty">暂时没有符合条件的需求。</div>'}</div></div>'''
+    u=user(request); primary=''; mine='<a class="btn secondary" href="/bounties/mine">我的需求</a>' if u else ''
+    body=f'''<div class="bw"><div class="bh"><div><div class="ey">DESIGN 100% · BOUNTY</div><h1>需求广场</h1><div class="lead">把还没有被解决的设计工作流问题公开出来。积分悬赏已停止新建。历史需求仍可查看和按原约定完成或取消。</div></div><div class="actions">{mine}{primary}</div></div><div class="filters">{sf}</div><div class="filters">{cf}</div><div class="grid">{''.join(cards) if cards else '<div class="empty">暂时没有符合条件的需求。</div>'}</div></div>'''
     return HTMLResponse(page(body))
 
 
 @router.get('/new', response_class=HTMLResponse)
 def new_bounty(request: Request):
-    u=user(request)
-    if not u: return login_redirect('/bounties/new')
-    init_db()
-    cur_name=coin_core.COIN_NAME
-    with site.db() as conn:
-        bal=coin_core.balance(conn,u['id'])
-    cats=''.join(f'<option value="{site.esc(c)}">{site.esc(c)}</option>' for c in core.TOOL_CATEGORIES)
-    dels=''.join(f'<option value="{site.esc(d)}">{site.esc(d)}</option>' for d in DELIVERABLES)
-    body=f'''<div class="bw"><div class="bh"><div><div class="ey">NEW BOUNTY</div><h1>发布需求</h1><div class="lead">描述真实工作中的问题，设置悬赏金额，让合适的小飞侠来解决。</div></div><a class="btn secondary" href="/bounties">返回需求广场</a></div><div class="panel"><div class="note">发布时悬赏会从你的余额中<b>冻结</b>，当前余额 {bal} {cur_name}。选中开发者并标记完成后，赏金转给该开发者；取消需求则全额退回。</div><form action="/bounties/new" method="post"><div class="field"><label>需求名称</label><input name="title" maxlength="120" required></div><div class="formgrid"><div class="field"><label>分类</label><select name="category">{cats}</select></div><div class="field"><label>期望交付</label><select name="deliverable">{dels}</select></div><div class="field"><label>悬赏金额（{cur_name}）</label><input name="reward" type="number" min="1" max="{coin_core.MAX_PRICE}" step="1" required></div><div class="field"><label>截止日期（可选）</label><input name="deadline" type="date"></div></div><div class="field"><label>需求说明</label><textarea name="description" rows="10" maxlength="10000" required></textarea></div><div class="field"><label>参考链接（可选）</label><input name="reference_url" placeholder="https://..."></div><button class="btn">发布悬赏</button></form></div></div>'''
-    return HTMLResponse(page(body,'发布需求 · 小飞侠设计100%'))
-
+    return HTMLResponse(page('<div class="bw"><div class="panel"><h1>积分悬赏已停用</h1><p>不再创建新的积分悬赏；历史需求可继续完成或取消。</p><a class="btn" href="/bounties">查看历史需求</a></div></div>'), status_code=410)
 
 @router.post('/new')
 def create_bounty(request: Request,title: str=Form(...),category: str=Form('其他'),description: str=Form(...),deliverable: str=Form('其他'),reward: int=Form(...),deadline: str=Form(''),reference_url: str=Form('')):
-    init_db(); u=user(request)
-    if not u: return login_redirect('/bounties/new')
-    title=title.strip(); description=description.strip()
-    if not title or len(title)>120: raise HTTPException(400,'需求名称不能为空，且最多 120 字。')
-    if not description or len(description)>10000: raise HTTPException(400,'需求说明不能为空，且最多 10000 字。')
-    if category not in core.TOOL_CATEGORIES: raise HTTPException(400,'请选择有效分类。')
-    if deliverable not in DELIVERABLES: raise HTTPException(400,'请选择有效交付形式。')
-    if reward<1 or reward>coin_core.MAX_PRICE:
-        raise HTTPException(400,f'悬赏金额需在 1—{coin_core.MAX_PRICE} {coin_core.COIN_NAME}之间。')
-    stamp=core.now()
-    with site.db() as conn:
-        cur=conn.execute('''INSERT INTO bounties(user_id,title,category,description,deliverable,reference_url,reward,escrowed,deadline,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,1,?,'open',?,?)''',(u['id'],title,category,description,deliverable,safe_url(reference_url),reward,deadline.strip()[:10],stamp,stamp)); bid=cur.lastrowid
-        # Freeze the reward now so an open bounty is always backed by credits.
-        coin_core.spend(conn,u['id'],reward,'bounty_escrow',ref=f'{bid}:{stamp}',note=title)
-    return RedirectResponse(f'/bounties/{bid}',303)
+    raise HTTPException(410, "积分悬赏已停用，不再接受新建。")
 
 
 @router.get('/mine', response_class=HTMLResponse)
@@ -192,7 +168,7 @@ def mine(request: Request):
     if u['role']==core.ROLE_XIAOFEIXIA:
         rr=''.join(f'<tr><td><a href="/bounties/{r["bounty_id"]}">{site.esc(r["title"])}</a></td><td>{site.esc("已选中" if r["status"]=="accepted" else "已提交")}</td><td>{site.esc(STATUSES.get(r["bounty_status"],r["bounty_status"]))}</td></tr>' for r in responses) or '<tr><td colspan="3">暂无响应</td></tr>'
         dev=f'<div class="panel"><h2>我响应的需求</h2><table class="table"><thead><tr><th>需求</th><th>方案状态</th><th>需求状态</th></tr></thead><tbody>{rr}</tbody></table></div>'
-    body=f'<div class="bw"><div class="bh"><div><div class="ey">MY BOUNTIES</div><h1>我的需求</h1></div><div class="actions"><a class="btn" href="/bounties/new">发布需求</a><a class="btn secondary" href="/bounties">需求广场</a></div></div><div class="panel"><h2>我发布的需求</h2><table class="table"><thead><tr><th>需求</th><th>悬赏</th><th>状态</th><th>响应</th></tr></thead><tbody>{own_rows}</tbody></table></div>{dev}</div>'
+    body=f'<div class="bw"><div class="bh"><div><div class="ey">MY BOUNTIES</div><h1>我的需求</h1></div><div class="actions"><a class="btn secondary" href="/bounties">需求广场</a></div></div><div class="panel"><h2>我发布的需求</h2><table class="table"><thead><tr><th>需求</th><th>悬赏</th><th>状态</th><th>响应</th></tr></thead><tbody>{own_rows}</tbody></table></div>{dev}</div>'
     return HTMLResponse(page(body,'我的需求 · 小飞侠设计100%'))
 
 
@@ -228,7 +204,6 @@ def detail(request: Request,bounty_id: int):
     buttons=[]
     if owner and b['status']=='in_progress': buttons.append(f'<form action="/bounties/{bounty_id}/status" method="post"><input type="hidden" name="status" value="completed"><button class="btn">标记已完成</button></form>')
     if owner and b['status'] in ('open','in_progress'): buttons.append(f'<form action="/bounties/{bounty_id}/status" method="post"><input type="hidden" name="status" value="cancelled"><button class="btn secondary">取消需求</button></form>')
-    if owner and b['status']=='cancelled': buttons.append(f'<form action="/bounties/{bounty_id}/status" method="post"><input type="hidden" name="status" value="open"><button class="btn">重新开放</button></form>')
     side=f'<div class="panel"><h3>需求信息</h3><div class="money">{money(b)}</div><div class="meta">发布者：{site.esc(b["display_name"])}<br>分类：{site.esc(b["category"])}<br>交付：{site.esc(b["deliverable"])}<br>截止：{site.esc(b["deadline"] or "不限")}<br>响应：{len(rs)}</div><div class="actions" style="margin-top:14px">{"".join(buttons)}</div></div><div class="note">{escrow_note}</div>'
     body=f'<div class="bw"><div class="bh"><div><div class="ey">BOUNTY #{b["id"]}</div><h1>{site.esc(b["title"])}</h1><div class="actions">{badge(b["status"])}<span class="tag">{site.esc(b["category"])}</span></div></div><a class="btn secondary" href="/bounties">返回需求广场</a></div><div class="layout"><div><div class="panel"><h2>需求说明</h2><div class="body">{site.esc(b["description"])}</div>{ref}</div>{response}</div><div>{side}</div></div></div>'
     return HTMLResponse(page(body,f'{b["title"]} · 需求广场'))
@@ -276,9 +251,12 @@ def accept(request: Request,bounty_id: int,response_id: int):
 def set_status(request: Request,bounty_id: int,status: str=Form(...)):
     init_db(); u=user(request)
     if not u: return login_redirect(f'/bounties/{bounty_id}')
+    if status == 'open':
+        raise HTTPException(410, '积分悬赏不再重新开放。')
     if status not in ('open','completed','cancelled'): raise HTTPException(400,'状态不正确。')
     stamp=core.now()
     with site.db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
         b=conn.execute('SELECT * FROM bounties WHERE id=?',(bounty_id,)).fetchone()
         if not b: raise HTTPException(404,'需求不存在。')
         if int(b['user_id'])!=int(u['id']): raise HTTPException(403,'只有需求发布者可以修改状态。')

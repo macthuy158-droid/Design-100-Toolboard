@@ -62,10 +62,10 @@ def install_streaming_submit(router):
         clean_version = version.strip()
         if not clean_version:
             raise HTTPException(status_code=400, detail="版本号不能为空。")
-        if feixia_coin_price < 0 or feixia_coin_price > coin_core.MAX_PRICE:
+        if feixia_coin_price != 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"{coin_core.COIN_NAME}价格需在 0—{coin_core.MAX_PRICE} 之间。",
+                detail="积分定价已停用，请设置人民币售价。",
             )
 
         is_web_app = submission_type == "new_web_app"
