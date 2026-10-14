@@ -69,6 +69,11 @@ SESSION_UI = r'''
         }
         if (register) register.remove();
         if (developer && !state.can_publish) developer.remove();
+        if (state.is_admin && !nav.querySelector('a[href="/manage/"]')) {
+          const admin = document.createElement('a');
+          admin.href = '/manage/'; admin.textContent = '管理控制台';
+          nav.appendChild(admin);
+        }
       });
     } catch (_) {}
   }
@@ -139,6 +144,7 @@ def account_session(request: Request):
         "role": user["role"],
         "role_label": community_core.user_label(user),
         "can_publish": community_core.is_developer(user),
+        "is_admin": community_core.is_admin(user),
     }
 
 
@@ -162,6 +168,8 @@ def branded_admin_page(body, title=f"{BRAND_NAME} · 管理后台"):
 
 
 admin_portal.admin_page = branded_admin_page
+community_admin.app.add_exception_handler(admin_portal.HTTPException, admin_portal.admin_exception)
+course_admin.app.add_exception_handler(admin_portal.HTTPException, admin_portal.admin_exception)
 admin_portal.app.mount("/community", community_admin.app)
 admin_portal.app.mount("/courses", course_admin.app)
 app.mount("/manage", admin_portal.app)

@@ -200,7 +200,7 @@ def yuan_to_cents(value):
 
 
 def csrf_token(request, admin=False):
-    token = request.cookies.get(site.COOKIE_NAME if admin else core.USER_COOKIE, '')
+    token = request.cookies.get(core.USER_COOKIE, '')
     return hmac.new(core.SESSION_SECRET.encode(), (('admin-price:' if admin else 'purchase:') + token).encode(), hashlib.sha256).hexdigest()
 
 

@@ -44,6 +44,9 @@ jobs:
       - name: Check registration and developer approval
         env: *test_env
         run: python scripts/check_registration.py
+      - name: Check unified admin authorization
+        env: *test_env
+        run: python scripts/check_unified_admin.py
       - name: Install isolated Pay100 gateway dependencies
         run: pip install -r pay100_gateway/requirements.txt
       - name: Check Pay100 gateway security

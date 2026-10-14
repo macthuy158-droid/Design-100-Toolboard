@@ -52,26 +52,38 @@ def developer_required(request):
     return user
 
 
+def safe_next(value):
+    return value if value.startswith('/') and not value.startswith('//') and chr(92) not in value and not any(ord(c)<32 for c in value) else '/account/me'
+
+
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/"):
+def login_page(request: Request, next: str = "/account/me"):
     user = core.current_user(request)
     if user:
-        return RedirectResponse(next or "/", 303)
+        return RedirectResponse(safe_next(next), 303)
     body = f'''<div class="loginwrap"><div class="login"><div class="eyebrow">DESGIN 100%</div><h1>登录</h1>
     <div class="notice">使用注册时的邮箱或院内账号登录。还没有账号？<a href="/account/register">点此注册</a>。</div>
-    <form action="/account/login" method="post"><input type="hidden" name="next" value="{site.esc(next)}"><div class="field"><label>用户名 / 邮箱</label><input name="account" required autofocus></div>
+    <form action="/account/login" method="post"><input type="hidden" name="next" value="{site.esc(safe_next(next))}"><div class="field"><label>用户名 / 邮箱</label><input name="account" required autofocus></div>
     <div class="field"><label>密码</label><input name="password" type="password" required></div><button class="btn" type="submit">登录</button> <a class="btn secondary" href="/account/register">注册</a></form></div></div>'''
     return HTMLResponse(page(body,"登录 · 小飞侠设计100%"))
 
 
 @router.post("/login")
-def login(request: Request, account: str = Form(...), password: str = Form(...), next: str = Form("/")):
+def login(request: Request, account: str = Form(...), password: str = Form(...), next: str = Form("/account/me")):
+    import admin_portal
     core.init_db()
+    ip = admin_portal.client_ip(request)
+    wait = admin_portal.login_retry_after(ip)
+    if wait:
+        raise HTTPException(429, '尝试次数过多，请稍后重试。', headers={'Retry-After':str(wait)})
     with site.db() as conn:
         user = conn.execute("SELECT * FROM community_users WHERE (username=? COLLATE NOCASE OR email=? COLLATE NOCASE) AND active=1", (account.strip(),account.strip())).fetchone()
-    if not user or not core.verify_password(password,user['password_salt'],user['password_hash']):
+    valid = core.verify_password(password, user['password_salt'] if user else '0'*32, user['password_hash'] if user else '0'*64) if len(password)<=1024 else False
+    if not user or not valid:
+        admin_portal.record_login_failure(ip)
         raise HTTPException(status_code=401, detail="用户名或密码不正确。")
-    resp = RedirectResponse(next if next.startswith('/') else '/',303)
+    admin_portal.clear_login_failures(ip)
+    resp = RedirectResponse(safe_next(next),303)
     resp.set_cookie(core.USER_COOKIE,core.make_session(user['id']),httponly=True,secure=True,samesite="lax",max_age=7*86400)
     return resp
 
@@ -177,7 +189,8 @@ def register(request: Request, role: str = Form('xiaoyouxia'), display_name: str
 
 
 @router.post("/logout")
-def logout():
+def logout(request: Request, csrf: str = Form("")):
+    payment_core.check_csrf(request, csrf)
     resp=RedirectResponse('/',303); resp.delete_cookie(core.USER_COOKIE); return resp
 
 
@@ -243,7 +256,8 @@ def me(request: Request):
             note = ('<div class="notice">上次申请未通过：' + site.esc(application['review_note'] or '请补充工具计划后重新申请。') + '</div>') if application and application['status'] == 'rejected' else ''
             dev = f'''<div class="community-card"><h2>成为开发者</h2><p class="muted">想分享自己的工具？提交开发方向与工具计划，审核通过后即可发布。开发者资格不包含院内课程福利。</p>{note}<form action="/account/developer/apply" method="post"><input type="hidden" name="csrf" value="{payment_core.csrf_token(request)}"><div class="field"><label for="developer-proposal">开发方向与工具计划</label><textarea id="developer-proposal" name="proposal" minlength="10" maxlength="2000" required></textarea></div><button class="btn">申请成为开发者</button></form></div>'''
 
-    body=f'<div class="community-wrap"><div class="community-card"><span class="role">{core.user_label(user)}</span><h1>{site.esc(user["display_name"])}</h1><p>{site.esc(user["email"] or "院内账号")}</p><form action="/account/logout" method="post"><button class="btn secondary">退出登录</button></form></div>{coin_html}{dev}<div class="community-card"><h2>我的购买</h2><div class="table-wrap"><table class="table"><tbody>{order_rows}</tbody></table></div></div></div>'
+    admin_entry = '<div class="community-card"><h2>管理控制台</h2><p class="muted">管理用户、开发者申请、商品和订单。</p><a class="btn" href="/manage/">进入管理控制台</a></div>' if core.is_admin(user) else ''
+    body=f'<div class="community-wrap"><div class="community-card"><span class="role">{core.user_label(user)}</span><h1>{site.esc(user["display_name"])}</h1><p>{site.esc(user["email"] or "院内账号")}</p><form action="/account/logout" method="post"><input type="hidden" name="csrf" value="{payment_core.csrf_token(request)}"><button class="btn secondary">退出登录</button></form></div>{admin_entry}{coin_html}{dev}<div class="community-card"><h2>我的购买</h2><div class="table-wrap"><table class="table"><tbody>{order_rows}</tbody></table></div></div></div>'
     return HTMLResponse(page(body,"我的账号 · 小飞侠设计100%"))
 
 
