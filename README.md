@@ -7,7 +7,7 @@
 - 默认 `/account/register` 创建普通账号：昵称、邮箱、密码及确认密码，无需选择身份或邀请码。
 - `/account/register/internal` 单独处理院内实名/邀请码注册。已有院内账号保留开发者权限及原课程福利。
 - 普通账号在个人中心申请开发者资格，管理员审核通过后可发布工具、维护自己的工具；仍按普通用户规则购买付费课程。
-- 管理员使用独立后台账号，在“开发者申请”审核，并继续管理用户、投稿、商品与订单。
+- 管理员是统一用户账号上的独立权限标记，从主网站登录，个人中心和导航出现管理控制台；后台仍在 /manage/，不再使用独立登录密码。
 - `TOOLBOARD_GUEST_SIGNUP` 默认1；显式设0可暂停公开注册。当前没有邮箱验证/找回密码服务，未声称验证邮箱归属。
 
 ## 当前功能
@@ -39,8 +39,6 @@ uvicorn app:app --host 127.0.0.1 --port 8100
 ## 服务器环境变量
 
 ```env
-TOOLBOARD_ADMIN_USERNAME=admin
-TOOLBOARD_ADMIN_PASSWORD=change-me
 TOOLBOARD_SESSION_SECRET=change-me-to-a-long-random-string
 TOOLBOARD_DATA_DIR=/opt/design100-toolboard/data
 CAD100_LICENSE_DB=/opt/cad100-license/data/license.db
@@ -97,3 +95,15 @@ GitHub Actions 会在 push / pull request 时自动执行这些检查。
 - CAD-100 授权服务：独立服务与数据库
 
 两个项目保持独立 Git 仓库、独立 systemd 服务和独立运行目录。
+
+## 统一管理员登录与绑定
+
+`is_admin` 与院内身份、开发者资格独立，默认0；注册和开发者审核不能授予管理员权限。
+在服务器终端执行 `scripts/grant_admin.py --database <实际toolboard.db路径> --username <准确登录用户名>`，
+仅匹配一个已启用的登录用户名，先备份数据库再记录授权，不按昵称猜测，不创建账号，不修改密码或已有购买。
+这是服务器CLI，不是公开网站接口。进入后台使用该账号原有主站密码。
+旧环境中的 TOOLBOARD_ADMIN_USERNAME/PASSWORD 不再用于登录，旧管理员Cookie与POST /manage/login不再授权。
+统一后台POST使用用户会话绑定CSRF，权限撤销/停用即时生效；最后一个启用管理员不能在后台停用。
+
+发布新版本前先成功绑定现有账号，再重启服务；若绑定失败不要重启，以免丢失当前后台入口。
+新代码为数据库增加is_admin列与授权审计表，不删除用户或旧业务数据。

@@ -7,7 +7,8 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import coin_core
-from app_v2 import ADMIN_PASSWORD, COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, session_token, valid_session
+import community_core as core
+from app_v2 import COOKIE_NAME, db, esc, format_bytes, init_db, latest_release, now_text, page, valid_session
 from community_core import DEFAULT_TOOL_CATEGORY, TOOL_CATEGORIES
 
 ADMIN_USERNAME = os.getenv("TOOLBOARD_ADMIN_USERNAME", "admin").strip() or "admin"
@@ -81,27 +82,75 @@ ADMIN_CSS = r'''
 '''
 
 
-def admin_page(body, title="管理后台"):
-    return page(ADMIN_CSS + body, title)
+def csrf_forms(body, request=None):
+    import re
+    import payment_core
+    req = request or ADMIN_REQUEST.get(None)
+    if req is not None:
+        token = payment_core.csrf_token(req, admin=True)
+        body = re.sub(r'(<form\b[^>]*\bmethod=["\']post["\'][^>]*>)',
+                      lambda m: m.group(1) + '<input type="hidden" name="csrf" value="' + token + '">',
+                      body, flags=re.I)
+    return body
+
+
+def admin_page(body, title="管理后台", request=None):
+    return page(ADMIN_CSS + csrf_forms(body, request), title)
+
+
+from contextvars import ContextVar
+ADMIN_REQUEST = ContextVar('admin_request', default=None)
 
 
 def require_admin(request: Request):
-    if not valid_session(request):
-        raise HTTPException(status_code=401, detail="请先登录后台。")
+    user = core.current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="请从主网站登录。")
+    if not core.is_admin(user):
+        raise HTTPException(status_code=403, detail="此账号没有管理员权限。")
+    ADMIN_REQUEST.set(request)
+    return user
+
+
+@app.middleware('http')
+async def protect_admin_posts(request: Request, call_next):
+    if request.method in ('POST','PUT','PATCH','DELETE') and request.url.path.rstrip('/').split('/')[-1] != 'login':
+        import payment_core
+        user = core.current_user(request)
+        if not core.is_admin(user):
+            return JSONResponse({'detail':'需要管理员账号。'}, status_code=403 if user else 401)
+        body = await request.body()  # Cache bytes before parsing so downstream Form fields work.
+        if len(body) > 2 * 1024 * 1024:
+            return JSONResponse({'detail':'请求过大。'}, status_code=413)
+        form = await request.form()
+        token = request.headers.get('X-CSRF-Token') or str(form.get('csrf',''))
+        try:
+            payment_core.check_csrf(request, token, admin=True)
+        except HTTPException as error:
+            return JSONResponse({'detail':error.detail}, status_code=error.status_code)
+    return await call_next(request)
+
+
+@app.exception_handler(HTTPException)
+async def admin_exception(request: Request, error: HTTPException):
+    if error.status_code == 401 and request.method == 'GET':
+        from urllib.parse import quote
+        return RedirectResponse('/account/login?next=' + quote(request.url.path, safe=''), 303)
+    return JSONResponse({'detail':error.detail}, status_code=error.status_code, headers=error.headers)
 
 
 @app.get('/', response_class=HTMLResponse)
 def dashboard(request: Request):
     init_db()
-    if not valid_session(request):
-        login='''<div class="loginwrap"><div class="login"><div class="eyebrow">DESIGN 100</div><h1>管理员登录</h1><form id="f"><div class="field"><label>管理员用户名</label><input id="u" autocomplete="username" autofocus></div><div class="field"><label>管理员密码</label><input id="p" type="password" autocomplete="current-password"></div><button class="btn">进入后台</button><div id="m" class="msg"></div></form></div></div><script>document.getElementById("f").addEventListener("submit",async e=>{e.preventDefault();const r=await fetch("/manage/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:document.getElementById("u").value,password:document.getElementById("p").value})});const j=await r.json().catch(()=>({}));if(r.ok)location.href="/manage/";else document.getElementById("m").textContent=j.detail||"登录失败"})</script>'''
-        return HTMLResponse(admin_page(login))
+    if not core.current_user(request):
+        return RedirectResponse('/account/login?next=/manage/', 303)
+    require_admin(request)
     with db() as conn:
         pending=conn.execute("SELECT COUNT(*) c FROM tool_submissions WHERE status='pending'").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tool_submissions'").fetchone() else 0
         tools=conn.execute("SELECT COUNT(*) c FROM tools").fetchone()['c']
         users=conn.execute("SELECT COUNT(*) c FROM community_users").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='community_users'").fetchone() else 0
         courses=conn.execute("SELECT COUNT(*) c FROM courses").fetchone()['c'] if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='courses'").fetchone() else 0
-    body=f'''<div class="admin-shell"><div class="admin-head"><div><div class="eyebrow">DESIGN 100 · ADMIN</div><h1>管理后台</h1><div class="admin-sub">工具、用户与官方课程的维护入口。</div></div><button class="btn secondary" onclick="fetch('/manage/logout',{{method:'POST'}}).then(()=>location.href='/manage/')">退出</button></div><div class="admin-home">
+    body=f'''<div class="admin-shell"><div class="admin-head"><div><div class="eyebrow">DESIGN 100 · ADMIN</div><h1>管理后台</h1><div class="admin-sub">工具、用户与官方课程的维护入口。</div></div><button class="btn secondary" onclick="location.href='/account/me'">返回个人中心</button></div><div class="admin-home">
     <a class="entry" href="/manage/community/review"><b>{pending}</b><h2>投稿审核</h2><p>审核新工具和版本更新。</p></a>
     <a class="entry" href="/manage/tools/"><b>{tools}</b><h2>工具管理</h2><p>修改资料、价格、上下架，查看版本历史。</p></a>
     <a class="entry" href="/manage/community/users"><b>{users}</b><h2>用户管理</h2><p>管理小飞侠与小游侠账号。</p></a>
@@ -141,45 +190,22 @@ def tool_admin(request: Request, slug: str):
     return HTMLResponse(admin_page(body,f'{t["name"]} · 工具管理'))
 
 
+@app.get('/login')
+def legacy_login_page():
+    return RedirectResponse('/account/login?next=/manage/', 303)
+
+
 @app.post('/login')
 async def login(request: Request):
-    if not ADMIN_PASSWORD:
-        raise HTTPException(503,"后台账号未配置。")
-
-    ip=client_ip(request)
-    wait=login_retry_after(ip)
-    if wait:
-        raise HTTPException(429, f"尝试次数过多，请在 {wait // 60 + 1} 分钟后重试。",
-                            headers={"Retry-After": str(wait)})
-
-    try:
-        data=await request.json()
-    except Exception:
-        raise HTTPException(400,"请求格式不正确。")
-    if not isinstance(data, dict):
-        raise HTTPException(400,"请求格式不正确。")
-
-    username=str(data.get('username','')).strip()
-    password=str(data.get('password',''))
-    # Both compared every time so a wrong username costs the same as a wrong
-    # password, and neither can be told apart from the response.
-    ok_user=_same(username,ADMIN_USERNAME)
-    ok_pass=_same(password,ADMIN_PASSWORD)
-    if not (ok_user and ok_pass):
-        record_login_failure(ip)
-        left=max(0, LOGIN_MAX_FAILS-len(_login_fails.get(ip,[])))
-        detail="管理员用户名或密码不正确。"
-        if left<=2:
-            detail+=f"（还可尝试 {left} 次，之后将暂时锁定）"
-        raise HTTPException(401, detail)
-
-    clear_login_failures(ip)
-    resp=JSONResponse({'success':True}); resp.set_cookie(COOKIE_NAME,session_token(),httponly=True,secure=True,samesite='strict',max_age=8*3600); return resp
+    raise HTTPException(410, '请使用主网站账号登录；独立管理员密码已停用。')
 
 
 @app.post('/logout')
-def logout():
-    resp=JSONResponse({'success':True}); resp.delete_cookie(COOKIE_NAME); return resp
+def logout(request: Request):
+    resp = RedirectResponse('/account/login', 303)
+    resp.delete_cookie(core.USER_COOKIE)
+    resp.delete_cookie(COOKIE_NAME)
+    return resp
 
 
 @app.post('/tools/{slug}/update')

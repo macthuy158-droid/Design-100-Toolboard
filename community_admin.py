@@ -21,7 +21,7 @@ def require_admin(request):
 
 
 def page(body, title="管理后台 · 小飞侠设计100%"):
-    return site.page(CSS + body, title)
+    return site.page(CSS + admin_portal.csrf_forms(body), title)
 
 
 def admin_nav(active=""):
@@ -104,7 +104,7 @@ def users_page(request: Request):
     for u in users:
         state='<span class="badge ok">启用</span>' if u['active'] else '<span class="badge off">停用</span>'
         toggle='停用' if u['active'] else '启用'
-        reset=f'<form action="/manage/community/users/{u["id"]}/reset-password" method="post" onsubmit="return confirm(\'确定将密码重置为姓名吗？\')"><button class="btn secondary mini">重置密码</button></form>' if u['role']==core.ROLE_XIAOFEIXIA else ''
+        reset=f'<form action="/manage/community/users/{u["id"]}/reset-password" method="post" onsubmit="return confirm(\'确定将密码重置为姓名吗？\')"><button class="btn secondary mini">重置密码</button></form>' if u['role']==core.ROLE_XIAOFEIXIA and not core.is_admin(u) else ''
         rows.append(f'''<tr><td><b>{site.esc(u['display_name'])}</b><br><span class="muted">{site.esc(u['username'])}</span></td><td>{core.user_label(u)}</td><td>{site.esc(u['email'] or '院内账号')}</td><td>{state}</td><td><div class="actions"><form action="/manage/community/users/{u['id']}/toggle" method="post"><button class="btn secondary mini">{toggle}</button></form>{reset}</div></td></tr>''')
 
     body=f'''<div class="wrap"><div class="top"><div><div class="eyebrow">ADMIN</div><h1>用户管理</h1><div class="muted">只管理账号，不在这里处理工具和投稿。</div></div>{admin_nav('users')}</div>
@@ -211,8 +211,11 @@ def add_user(request: Request, name: str = Form(...)):
 def toggle_user(request: Request, user_id: int):
     require_admin(request)
     with site.db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
         u=conn.execute("SELECT * FROM community_users WHERE id=?", (user_id,)).fetchone()
         if not u: raise HTTPException(404, "用户不存在。")
+        if u['active'] and core.is_admin(u) and conn.execute('SELECT COUNT(*) FROM community_users WHERE active=1 AND is_admin=1').fetchone()[0] <= 1:
+            raise HTTPException(409, '至少保留一个可登录的管理员账号。')
         conn.execute("UPDATE community_users SET active=?,updated_at=? WHERE id=?", (0 if u['active'] else 1, core.now(), user_id))
     return RedirectResponse('/manage/community/users', 303)
 
@@ -223,6 +226,8 @@ def reset_password(request: Request, user_id: int):
     with site.db() as conn:
         u=conn.execute("SELECT * FROM community_users WHERE id=? AND role=?", (user_id, core.ROLE_XIAOFEIXIA)).fetchone()
         if not u: raise HTTPException(404, "小飞侠用户不存在。")
+        if core.is_admin(u):
+            raise HTTPException(409, '管理员不能使用姓名重置密码。')
         salt,digest=core.hash_password(u['display_name'])
         conn.execute("UPDATE community_users SET password_salt=?,password_hash=?,updated_at=? WHERE id=?", (salt,digest,core.now(),user_id))
     return RedirectResponse('/manage/community/users', 303)
@@ -436,5 +441,5 @@ def review_developer(request: Request, application_id: int, decision: str = Form
         if decision == 'approved':
             conn.execute('UPDATE community_users SET developer_enabled=1,updated_at=? WHERE id=?', (core.now(), user['id']))
         conn.execute('''UPDATE developer_applications SET status=?,review_note=?,reviewed_by=?,reviewed_at=? WHERE id=?''',
-                     (decision, note.strip(), os.getenv('TOOLBOARD_ADMIN_USERNAME', 'admin'), core.now(), application_id))
+                     (decision, note.strip(), core.current_user(request)['username'], core.now(), application_id))
     return RedirectResponse('/manage/community/developer-applications', 303)

@@ -117,15 +117,9 @@ def session_token():
 
 
 def valid_session(request: Request):
-    value = request.cookies.get(COOKIE_NAME, "")
-    try:
-        stamp, sig = value.split(".", 1)
-        if int(stamp) < int(datetime.now(timezone.utc).timestamp()):
-            return False
-        expected = hmac.new(SESSION_SECRET.encode(), stamp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected)
-    except Exception:
-        return False
+    """Administrative authorization uses the ordinary, signed user session."""
+    from community_core import current_user, is_admin
+    return is_admin(current_user(request))
 
 
 def require_admin(request: Request):

@@ -1,5 +1,6 @@
 """Retirement checks against a disposable DB; no real accounts or payments."""
 import os
+import re
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -40,10 +41,15 @@ client.cookies.set(core.USER_COOKIE,core.make_session(owner_id))
 assert client.post('/account/tools/retire-paid/coin-price',data={'feixia_coin_price':1}).status_code == 410
 assert 'name="feixia_coin_price"' not in client.get('/account/me').text
 assert 'name="feixia_coin_price"' not in client.get('/developer/submit').text
-with patch('community_admin.require_admin',return_value=None):
-    assert client.post(f'/manage/community/coins/{buyer_id}/adjust',data={'delta':5}).status_code == 410
-    archive=client.get('/manage/community/coins').text
-    assert '只读存档' in archive and '/adjust"' not in archive
+with site.db() as c:
+    c.execute('UPDATE community_users SET is_admin=1 WHERE id=?',(owner_id,))
+client.cookies.set(core.USER_COOKIE,core.make_session(owner_id))
+admin_csrf=re.search(r'name="csrf" value="([a-f0-9]+)"',client.get('/manage/tools/retire-paid').text).group(1)
+assert client.post(f'/manage/community/coins/{buyer_id}/adjust',data={'delta':5,'csrf':admin_csrf}).status_code == 410
+archive=client.get('/manage/community/coins').text
+assert '只读存档' in archive and '/adjust"' not in archive
+with site.db() as c:
+    c.execute('UPDATE community_users SET is_admin=0 WHERE id=?',(owner_id,))
 with site.db() as c:
     assert coin_core.balance(c,buyer_id)==balance
     assert coin_core.balance(c,owner_id)==0

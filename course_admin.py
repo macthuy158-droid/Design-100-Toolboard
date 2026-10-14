@@ -25,7 +25,7 @@ def require_admin(request):
 
 
 def page(body, title="课程管理 · 小飞侠设计100%"):
-    return site.page(CSS + body, title)
+    return site.page(CSS + admin_portal.csrf_forms(body), title)
 
 
 def admin_nav(active=""):

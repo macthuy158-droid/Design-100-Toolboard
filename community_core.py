@@ -226,9 +226,15 @@ def init_db():
         if 'app_url' not in cols:
             conn.execute("ALTER TABLE tools ADD COLUMN app_url TEXT NOT NULL DEFAULT ''")
         user_cols = {r['name'] for r in conn.execute("PRAGMA table_info(community_users)")}
+        if 'is_admin' not in user_cols:
+            conn.execute("ALTER TABLE community_users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
         if 'developer_enabled' not in user_cols:
             conn.execute("ALTER TABLE community_users ADD COLUMN developer_enabled INTEGER NOT NULL DEFAULT 0")
-        conn.executescript('''CREATE TABLE IF NOT EXISTS developer_applications (
+        conn.executescript('''CREATE TABLE IF NOT EXISTS admin_access_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+            action TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS developer_applications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL REFERENCES community_users(id),
             proposal TEXT NOT NULL,
@@ -277,7 +283,13 @@ def is_developer(user):
     ))
 
 
+def is_admin(user):
+    return bool(user and user['active'] and 'is_admin' in user.keys() and user['is_admin'])
+
+
 def user_label(user):
+    if is_admin(user):
+        return '管理员'
     if user['role'] == ROLE_XIAOFEIXIA:
         return '院内开发者'
     return '开发者' if is_developer(user) else '普通用户'
